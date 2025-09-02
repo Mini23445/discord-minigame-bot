@@ -230,6 +230,11 @@ async def check_game_answer(message):
             if message.channel.id in active_games:
                 del active_games[message.channel.id]
                 
+                # Reset message counter after a game ends
+                global message_count
+                message_count = 0
+                print("Game won - message counter reset to 0")
+                
                 # Cancel the timeout task to prevent it from running
                 if message.channel.id in game_timeouts:
                     timeout_task = game_timeouts[message.channel.id]
@@ -353,12 +358,16 @@ async def game_timeout(channel_id, answer, game_type):
                     elif game_type == "color":
                         embed.add_field(name="🎨 Answer", value=f"The color was **{answer}**", inline=False)
                     
-                    embed.set_footer(text="Next Mini-Game in 15 messages")
+                    embed.set_footer(text="Next Mini-Game in 100 messages")
                     await channel.send(embed=embed)
                 
                 # Always remove the game after timeout
                 del active_games[channel_id]
-                print(f"Game timeout: {game_type} game ended, answer was {answer}")
+                
+                # Reset message counter after game timeout
+                global message_count
+                message_count = 0
+                print(f"Game timeout: {game_type} game ended, message counter reset to 0")
     except Exception as e:
         print(f"Error in game timeout: {e}")
         # Force remove the game even if there's an error
