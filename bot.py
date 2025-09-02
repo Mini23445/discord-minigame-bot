@@ -7,9 +7,11 @@ import os
 from typing import Optional
 import time
 import shutil
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Bot configuration
-GAME_CHANNEL_ID = 1410690717847785512  # Updated game channel
+GAME_CHANNEL_ID = 1410685631486628042  # Updated game channel
 REDEEM_CHANNEL_ID = 1412142445327683687  # Updated redeem logs channel
 LOG_CHANNEL_ID = 1412142500952408215     # New general logs channel
 PING_ROLE_ID = 1412030131937083392
@@ -833,6 +835,24 @@ async def on_command_error(ctx, error):
 @bot.event
 async def on_error(event, *args, **kwargs):
     print(f"Bot error in {event}: {args}")
+
+# Health check server for UptimeRobot
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Bot is running!')
+    
+    def log_message(self, format, *args):
+        pass  # Disable logging
+
+def start_health_server():
+    port = int(os.environ.get('PORT', 8000))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    server.serve_forever()
+
+# Start health server in background
+Thread(target=start_health_server, daemon=True).start()
 
 # Run the bot - Get token from environment variable
 if __name__ == "__main__":
