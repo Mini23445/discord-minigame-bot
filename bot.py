@@ -689,13 +689,7 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: s
         gift_cooldowns[user_id] = current_time + 3  # 3 second cooldown
         
         # Send public gift message
-        embed = discord.Embed(
-            title="🎁 Gift Sent!",
-            description=f"{interaction.user.mention} gifted **{format_gems(parsed_amount)}** 💎 gems to {user.mention}",
-            color=0xF1C40F
-        )
-        
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(f"{interaction.user.mention} gifted **{format_gems(parsed_amount)}** 💎 gems to {user.mention}")
         
         # Log the gift
         try:
