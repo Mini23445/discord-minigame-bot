@@ -16,6 +16,9 @@ REDEEM_CHANNEL_ID = 1412142445327683687  # Updated redeem logs channel
 LOG_CHANNEL_ID = 1412142500952408215     # New general logs channel
 PING_ROLE_ID = 1412030131937083392
 
+# Gift allowed channels
+GIFT_CHANNELS = [1410685631486628042, 1411246877781004359, 1410690717847785512]
+
 # Initialize bot
 intents = discord.Intents.default()
 intents.message_content = True
@@ -27,6 +30,9 @@ active_games = {}
 game_timeouts = {}  # Store timeout tasks so we can cancel them
 user_balances = {}
 last_games = []
+
+# Gift cooldown tracking
+gift_cooldowns = {}
 
 # Word list for unscramble game
 WORDS = [
@@ -145,7 +151,7 @@ async def on_message(message):
             
             await check_game_answer(message)
             
-            if message_count >= 15 and message.channel.id not in active_games:
+            if message_count >= 100 and message.channel.id not in active_games:
                 message_count = 0
                 await start_mini_game(message.channel)
         
@@ -209,7 +215,7 @@ async def check_game_answer(message):
                     embed.description = f"**{message.author.display_name}** won! The answer was **{correct_answer}** 🎉"
                 
                 embed.add_field(name="💰 Earned", value="`+15M` 💎", inline=True)
-                embed.add_field(name="Next Game", value="`15 messages`", inline=True)
+                embed.add_field(name="Next Game", value="`100 messages`", inline=True)
                 
                 if message.author.avatar:
                     embed.set_thumbnail(url=message.author.avatar.url)
@@ -219,7 +225,7 @@ async def check_game_answer(message):
             except Exception as e:
                 print(f"Error sending winner message: {e}")
                 # Fallback message if embed fails
-                await message.channel.send(f"{message.author.mention} won! +20M gems")
+                await message.channel.send(f"{message.author.mention} won! +15M gems")
             
             # Remove the game IMMEDIATELY after winner is declared
             # This prevents the timeout function from running
@@ -246,331 +252,7 @@ async def check_game_answer(message):
                         log_embed.add_field(name="🎮 Game Type", value=f"**{game_type.title()}**", inline=True)
                         log_embed.add_field(name="💰 Gems Awarded", value="**15M** 💎", inline=True)
                         log_embed.add_field(name="🏆 Answer", value=f"**{correct_answer}**", inline=True)
-                        log_embed.add_field(name="📍 Channel", value=f"<#{message.channel.id}>", inline=True)
-                        log_embed.timestamp = discord.utils.utcnow()
-                        await log_channel.send(embed=log_embed)
-                except Exception as e:
-                    print(f"Error logging winner: {e}")
-                    
-    except Exception as e:
-        print(f"Error in check_game_answer: {e}")
-        # If something goes wrong, try to clean up the game
-        if message.channel.id in active_games:
-            del active_games[message.channel.id]
-
-async def start_mini_game(channel):
-    global active_games, last_games
-    
-    try:
-        await channel.send(f"<@&{PING_ROLE_ID}>")
-        
-        all_games = ["number", "unscramble", "color"]
-        
-        if len(last_games) < 2:
-            available_games = all_games
-        else:
-            available_games = [game for game in all_games if game != last_games[-1]]
-        
-        game_type = random.choice(available_games)
-        
-        last_games.append(game_type)
-        if len(last_games) > 2:
-            last_games.pop(0)
-        
-        if game_type == "number":
-            await start_number_game(channel)
-        elif game_type == "unscramble":
-            await start_unscramble_game(channel)
-        elif game_type == "color":
-            await start_color_game(channel)
-    except Exception as e:
-        print(f"Error starting mini game: {e}")
-
-async def start_number_game(channel):
-    try:
-        number = random.randint(1, 10)
-        active_games[channel.id] = {"type": "number", "answer": number, "winner": None, "start_time": asyncio.get_event_loop().time()}
-        
-        end_time = int(time.time() + 18)
-        
-        embed = discord.Embed(
-            title="🎲 Number Challenge",
-            description="**Guess the correct number** 🎯",
-            color=0x00FFFF
-        )
-        embed.add_field(name="🎯 Range", value="`1` - `10`", inline=True)
-        embed.add_field(name="💰 Reward", value="`15M` 💎", inline=True)
-        embed.add_field(name="⏰ Ends", value=f"<t:{end_time}:R>", inline=True)
-        
-        await channel.send(embed=embed)
-        
-        # Store the timeout task so we can cancel it if someone wins
-        timeout_task = asyncio.create_task(game_timeout(channel.id, number, "number"))
-        game_timeouts[channel.id] = timeout_task
-        
-        # Log game start
-        try:
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    title="🎲 Number Game Started",
-                    color=0x00FFFF
-                )
-                log_embed.add_field(name="📍 Channel", value=f"<#{channel.id}>", inline=True)
-                log_embed.add_field(name="🎯 Answer", value=f"**{number}**", inline=True)
-                log_embed.add_field(name="⏰ Duration", value="18 seconds", inline=True)
-                log_embed.timestamp = discord.utils.utcnow()
-                await log_channel.send(embed=log_embed)
-        except Exception as e:
-            print(f"Error logging game start: {e}")
-    except Exception as e:
-        print(f"Error starting number game: {e}")
-
-async def game_timeout(channel_id, answer, game_type):
-    """Handle game timeout independently"""
-    try:
-        await asyncio.sleep(18)
-        
-        # Check if game is still active and no winner
-        if channel_id in active_games:
-            game_data = active_games[channel_id]
-            if not game_data.get('winner'):
-                channel = bot.get_channel(channel_id)
-                if channel:
-                    embed = discord.Embed(
-                        title="Time's Up!",
-                        color=0xFF0000
-                    )
-                    
-                    if game_type == "number":
-                        embed.add_field(name="🎲 Answer", value=f"The number was **{answer}**", inline=False)
-                    elif game_type == "unscramble":
-                        embed.add_field(name="🔤 Answer", value=f"The word was **{answer.upper()}**", inline=False)
-                    elif game_type == "color":
-                        embed.add_field(name="🎨 Answer", value=f"The color was **{answer}**", inline=False)
-                    
-                    embed.set_footer(text="Next Mini-Game in 15 messages")
-                    await channel.send(embed=embed)
-                
-                # Always remove the game after timeout
-                del active_games[channel_id]
-                print(f"Game timeout: {game_type} game ended, answer was {answer}")
-    except Exception as e:
-        print(f"Error in game timeout: {e}")
-        # Force remove the game even if there's an error
-        if channel_id in active_games:
-            del active_games[channel_id]
-
-async def start_unscramble_game(channel):
-    try:
-        word = random.choice(WORDS)
-        scrambled = list(word)
-        
-        # Better scrambling algorithm to ensure it's actually scrambled
-        max_attempts = 50
-        attempts = 0
-        while ''.join(scrambled) == word and attempts < max_attempts:
-            random.shuffle(scrambled)
-            attempts += 1
-        
-        scrambled_word = ''.join(scrambled)
-        
-        active_games[channel.id] = {"type": "unscramble", "answer": word, "winner": None, "start_time": asyncio.get_event_loop().time()}
-        
-        end_time = int(time.time() + 18)
-        
-        embed = discord.Embed(
-            title="🧩 Word Scramble",
-            description=f"**Unscramble the word** 🔤\n```{scrambled_word.upper()}```",
-            color=0x00FFFF
-        )
-        embed.add_field(name="📝 Letters", value=f"`{len(word)}`", inline=True)
-        embed.add_field(name="💰 Reward", value="`15M` 💎", inline=True)
-        embed.add_field(name="⏰ Ends", value=f"<t:{end_time}:R>", inline=True)
-        
-        await channel.send(embed=embed)
-        
-        # Store the timeout task so we can cancel it if someone wins
-        timeout_task = asyncio.create_task(game_timeout(channel.id, word, "unscramble"))
-        game_timeouts[channel.id] = timeout_task
-        
-        # Log game start
-        try:
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    title="🧩 Word Scramble Started",
-                    color=0x00FFFF
-                )
-                log_embed.add_field(name="📍 Channel", value=f"<#{channel.id}>", inline=True)
-                log_embed.add_field(name="🔤 Answer", value=f"**{word.upper()}**", inline=True)
-                log_embed.add_field(name="🔀 Scrambled", value=f"`{scrambled_word.upper()}`", inline=True)
-                log_embed.timestamp = discord.utils.utcnow()
-                await log_channel.send(embed=log_embed)
-        except Exception as e:
-            print(f"Error logging game start: {e}")
-    except Exception as e:
-        print(f"Error starting unscramble game: {e}")
-
-async def start_color_game(channel):
-    try:
-        color = random.choice(COLORS)
-        active_games[channel.id] = {"type": "color", "answer": color, "winner": None, "start_time": asyncio.get_event_loop().time()}
-        
-        end_time = int(time.time() + 18)
-        
-        embed = discord.Embed(
-            title="🎨 Color Challenge",
-            description="**Choose the correct color** 🌈",
-            color=0x00FFFF
-        )
-        embed.add_field(name="🌈 Options", value="`red` `blue` `green` `yellow` `purple` `orange`", inline=False)
-        embed.add_field(name="💰 Reward", value="`15M` 💎", inline=True)
-        embed.add_field(name="⏰ Ends", value=f"<t:{end_time}:R>", inline=True)
-        
-        await channel.send(embed=embed)
-        
-        # Store the timeout task so we can cancel it if someone wins
-        timeout_task = asyncio.create_task(game_timeout(channel.id, color, "color"))
-        game_timeouts[channel.id] = timeout_task
-        
-        # Log game start
-        try:
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    title="🎨 Color Game Started",
-                    color=0x00FFFF
-                )
-                log_embed.add_field(name="📍 Channel", value=f"<#{channel.id}>", inline=True)
-                log_embed.add_field(name="🌈 Answer", value=f"**{color}**", inline=True)
-                log_embed.add_field(name="⏰ Duration", value="18 seconds", inline=True)
-                log_embed.timestamp = discord.utils.utcnow()
-                await log_channel.send(embed=log_embed)
-        except Exception as e:
-            print(f"Error logging game start: {e}")
-    except Exception as e:
-        print(f"Error starting color game: {e}")
-
-@bot.tree.command(name="balance", description="Check your gem balance")
-async def balance(interaction: discord.Interaction):
-    try:
-        user_gems = get_balance(interaction.user.id)
-        
-        embed = discord.Embed(
-            title="💎 Your Gem Balance",
-            color=0x5865F2
-        )
-        embed.add_field(
-            name="💰 Current Balance",
-            value=f"{format_gems(user_gems)} Gems",
-            inline=False
-        )
-        embed.set_footer(text="Keep playing mini-games to earn more! 🎮")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    except Exception as e:
-        print(f"Error in balance command: {e}")
-        await interaction.response.send_message("An error occurred while checking your balance.", ephemeral=True)
-
-@bot.tree.command(name="redeem", description="Redeem your gems (minimum 10M)")
-async def redeem(interaction: discord.Interaction, amount: str):
-    try:
-        parsed_amount = parse_amount(amount)
-        
-        if parsed_amount is None:
-            embed = discord.Embed(
-                title="❌ Invalid Format",
-                description="Please use formats like: `10m`, `1.5b`, `5,000,000`, or `50000000`\n\n**Examples:**\n• `10m` = 10 million\n• `1b` = 1 billion\n• `5,000,000` = 5 million\n• `2.5m` = 2.5 million",
-                color=0xE74C3C
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        if parsed_amount < 10000000:
-            embed = discord.Embed(
-                title="❌ Minimum Amount Required",
-                description=f"The minimum redemption amount is **10M gems**! 💎\n\nYou tried to redeem: **{format_gems(parsed_amount)} gems**",
-                color=0xE74C3C
-            )
-            embed.set_footer(text="Play more mini-games to earn gems! 🎮")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        user_balance = get_balance(interaction.user.id)
-        
-        if user_balance < parsed_amount:
-            embed = discord.Embed(
-                title="💸 Insufficient Gems",
-                description=f"You only have **{format_gems(user_balance)} gems** but tried to redeem **{format_gems(parsed_amount)} gems**! 😅",
-                color=0xE74C3C
-            )
-            embed.set_footer(text="Play more mini-games to earn gems! 🎮")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        remove_gems(interaction.user.id, parsed_amount)
-        
-        embed = discord.Embed(
-            title="✅ Redemption Successful!",
-            color=0x00FF00
-        )
-        embed.add_field(
-            name="💎 Gems Redeemed", 
-            value=f"**{format_gems(parsed_amount)} Gems**", 
-            inline=True
-        )
-        embed.add_field(
-            name="💰 Remaining Balance", 
-            value=f"**{format_gems(get_balance(interaction.user.id))} Gems**", 
-            inline=True
-        )
-        embed.set_footer(text="Thank you for redeeming! 🎉")
-        if interaction.user.avatar:
-            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.avatar.url)
-        else:
-            embed.set_author(name=interaction.user.display_name)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        # Send notification to redeem channel
-        redeem_channel = bot.get_channel(REDEEM_CHANNEL_ID)
-        if redeem_channel:
-            notification_embed = discord.Embed(
-                title="💎 Gem Redemption",
-                color=0xF1C40F
-            )
-            notification_embed.add_field(
-                name="👤 User", 
-                value=f"{interaction.user.mention}\n`{interaction.user.id}`", 
-                inline=True
-            )
-            notification_embed.add_field(
-                name="💰 Amount", 
-                value=f"**{format_gems(parsed_amount)} Gems**", 
-                inline=True
-            )
-            notification_embed.add_field(
-                name="💳 Remaining Balance", 
-                value=f"**{format_gems(get_balance(interaction.user.id))} Gems**", 
-                inline=True
-            )
-            notification_embed.timestamp = discord.utils.utcnow()
-            
-            await redeem_channel.send(embed=notification_embed)
-            
-        # Also log to general log channel
-        try:
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    title="💎 Gem Redemption Log",
-                    color=0xF39C12
-                )
-                log_embed.add_field(name="👤 User", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
-                log_embed.add_field(name="💰 Redeemed", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
-                log_embed.add_field(name="💳 Balance After", value=f"**{format_gems(get_balance(interaction.user.id))}** 💎", inline=True)
-                log_embed.add_field(name="📍 Channel", value=f"<#{interaction.channel.id}>", inline=True)
+                        log_embed.add_field(name="📍 Channel", value=f"<#{interaction.channel.id}>", inline=True)
                 log_embed.timestamp = discord.utils.utcnow()
                 await log_channel.send(embed=log_embed)
         except Exception as e:
@@ -861,4 +543,404 @@ if __name__ == "__main__":
         bot.run(token)
     else:
         print("❌ DISCORD_BOT_TOKEN environment variable not found!")
-        print("Please set it in your Railway dashboard.")
+        print("Please set it in your Railway dashboard.")message.channel.id}>", inline=True)
+                        log_embed.timestamp = discord.utils.utcnow()
+                        await log_channel.send(embed=log_embed)
+                except Exception as e:
+                    print(f"Error logging winner: {e}")
+                    
+    except Exception as e:
+        print(f"Error in check_game_answer: {e}")
+        # If something goes wrong, try to clean up the game
+        if message.channel.id in active_games:
+            del active_games[message.channel.id]
+
+async def start_mini_game(channel):
+    global active_games, last_games
+    
+    try:
+        await channel.send(f"<@&{PING_ROLE_ID}>")
+        
+        all_games = ["number", "unscramble", "color"]
+        
+        if len(last_games) < 2:
+            available_games = all_games
+        else:
+            available_games = [game for game in all_games if game != last_games[-1]]
+        
+        game_type = random.choice(available_games)
+        
+        last_games.append(game_type)
+        if len(last_games) > 2:
+            last_games.pop(0)
+        
+        if game_type == "number":
+            await start_number_game(channel)
+        elif game_type == "unscramble":
+            await start_unscramble_game(channel)
+        elif game_type == "color":
+            await start_color_game(channel)
+    except Exception as e:
+        print(f"Error starting mini game: {e}")
+
+async def start_number_game(channel):
+    try:
+        number = random.randint(1, 10)
+        active_games[channel.id] = {"type": "number", "answer": number, "winner": None, "start_time": asyncio.get_event_loop().time()}
+        
+        end_time = int(time.time() + 18)
+        
+        embed = discord.Embed(
+            title="🎲 Number Challenge",
+            description="**Guess the correct number** 🎯",
+            color=0x00FFFF
+        )
+        embed.add_field(name="🎯 Range", value="`1` - `10`", inline=True)
+        embed.add_field(name="💰 Reward", value="`15M` 💎", inline=True)
+        embed.add_field(name="⏰ Ends", value=f"<t:{end_time}:R>", inline=True)
+        
+        await channel.send(embed=embed)
+        
+        # Store the timeout task so we can cancel it if someone wins
+        timeout_task = asyncio.create_task(game_timeout(channel.id, number, "number"))
+        game_timeouts[channel.id] = timeout_task
+        
+        # Log game start
+        try:
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="🎲 Number Game Started",
+                    color=0x00FFFF
+                )
+                log_embed.add_field(name="📍 Channel", value=f"<#{channel.id}>", inline=True)
+                log_embed.add_field(name="🎯 Answer", value=f"**{number}**", inline=True)
+                log_embed.add_field(name="⏰ Duration", value="18 seconds", inline=True)
+                log_embed.timestamp = discord.utils.utcnow()
+                await log_channel.send(embed=log_embed)
+        except Exception as e:
+            print(f"Error logging game start: {e}")
+    except Exception as e:
+        print(f"Error starting number game: {e}")
+
+async def game_timeout(channel_id, answer, game_type):
+    """Handle game timeout independently"""
+    try:
+        await asyncio.sleep(18)
+        
+        # Check if game is still active and no winner
+        if channel_id in active_games:
+            game_data = active_games[channel_id]
+            if not game_data.get('winner'):
+                channel = bot.get_channel(channel_id)
+                if channel:
+                    embed = discord.Embed(
+                        title="Time's Up!",
+                        color=0xFF0000
+                    )
+                    
+                    if game_type == "number":
+                        embed.add_field(name="🎲 Answer", value=f"The number was **{answer}**", inline=False)
+                    elif game_type == "unscramble":
+                        embed.add_field(name="🔤 Answer", value=f"The word was **{answer.upper()}**", inline=False)
+                    elif game_type == "color":
+                        embed.add_field(name="🎨 Answer", value=f"The color was **{answer}**", inline=False)
+                    
+                    embed.set_footer(text="Next Mini-Game in 100 messages")
+                    await channel.send(embed=embed)
+                
+                # Always remove the game after timeout
+                del active_games[channel_id]
+                print(f"Game timeout: {game_type} game ended, answer was {answer}")
+    except Exception as e:
+        print(f"Error in game timeout: {e}")
+        # Force remove the game even if there's an error
+        if channel_id in active_games:
+            del active_games[channel_id]
+
+async def start_unscramble_game(channel):
+    try:
+        word = random.choice(WORDS)
+        scrambled = list(word)
+        
+        # Better scrambling algorithm to ensure it's actually scrambled
+        max_attempts = 50
+        attempts = 0
+        while ''.join(scrambled) == word and attempts < max_attempts:
+            random.shuffle(scrambled)
+            attempts += 1
+        
+        scrambled_word = ''.join(scrambled)
+        
+        active_games[channel.id] = {"type": "unscramble", "answer": word, "winner": None, "start_time": asyncio.get_event_loop().time()}
+        
+        end_time = int(time.time() + 18)
+        
+        embed = discord.Embed(
+            title="🧩 Word Scramble",
+            description=f"**Unscramble the word** 🔤\n```{scrambled_word.upper()}```",
+            color=0x00FFFF
+        )
+        embed.add_field(name="📝 Letters", value=f"`{len(word)}`", inline=True)
+        embed.add_field(name="💰 Reward", value="`15M` 💎", inline=True)
+        embed.add_field(name="⏰ Ends", value=f"<t:{end_time}:R>", inline=True)
+        
+        await channel.send(embed=embed)
+        
+        # Store the timeout task so we can cancel it if someone wins
+        timeout_task = asyncio.create_task(game_timeout(channel.id, word, "unscramble"))
+        game_timeouts[channel.id] = timeout_task
+        
+        # Log game start
+        try:
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="🧩 Word Scramble Started",
+                    color=0x00FFFF
+                )
+                log_embed.add_field(name="📍 Channel", value=f"<#{channel.id}>", inline=True)
+                log_embed.add_field(name="🔤 Answer", value=f"**{word.upper()}**", inline=True)
+                log_embed.add_field(name="🔀 Scrambled", value=f"`{scrambled_word.upper()}`", inline=True)
+                log_embed.timestamp = discord.utils.utcnow()
+                await log_channel.send(embed=log_embed)
+        except Exception as e:
+            print(f"Error logging game start: {e}")
+    except Exception as e:
+        print(f"Error starting unscramble game: {e}")
+
+async def start_color_game(channel):
+    try:
+        color = random.choice(COLORS)
+        active_games[channel.id] = {"type": "color", "answer": color, "winner": None, "start_time": asyncio.get_event_loop().time()}
+        
+        end_time = int(time.time() + 18)
+        
+        embed = discord.Embed(
+            title="🎨 Color Challenge",
+            description="**Choose the correct color** 🌈",
+            color=0x00FFFF
+        )
+        embed.add_field(name="🌈 Options", value="`red` `blue` `green` `yellow` `purple` `orange`", inline=False)
+        embed.add_field(name="💰 Reward", value="`15M` 💎", inline=True)
+        embed.add_field(name="⏰ Ends", value=f"<t:{end_time}:R>", inline=True)
+        
+        await channel.send(embed=embed)
+        
+        # Store the timeout task so we can cancel it if someone wins
+        timeout_task = asyncio.create_task(game_timeout(channel.id, color, "color"))
+        game_timeouts[channel.id] = timeout_task
+        
+        # Log game start
+        try:
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="🎨 Color Game Started",
+                    color=0x00FFFF
+                )
+                log_embed.add_field(name="📍 Channel", value=f"<#{channel.id}>", inline=True)
+                log_embed.add_field(name="🌈 Answer", value=f"**{color}**", inline=True)
+                log_embed.add_field(name="⏰ Duration", value="18 seconds", inline=True)
+                log_embed.timestamp = discord.utils.utcnow()
+                await log_channel.send(embed=log_embed)
+        except Exception as e:
+            print(f"Error logging game start: {e}")
+    except Exception as e:
+        print(f"Error starting color game: {e}")
+
+@bot.tree.command(name="balance", description="Check your gem balance")
+async def balance(interaction: discord.Interaction):
+    try:
+        user_gems = get_balance(interaction.user.id)
+        
+        embed = discord.Embed(
+            title="💎 Your Gem Balance",
+            color=0x5865F2
+        )
+        embed.add_field(
+            name="💰 Current Balance",
+            value=f"{format_gems(user_gems)} Gems",
+            inline=False
+        )
+        embed.set_footer(text="Keep playing mini-games to earn more! 🎮")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception as e:
+        print(f"Error in balance command: {e}")
+        await interaction.response.send_message("An error occurred while checking your balance.", ephemeral=True)
+
+@bot.tree.command(name="gift", description="Gift gems to another user")
+async def gift(interaction: discord.Interaction, user: discord.Member, amount: str):
+    try:
+        # Check if command is used in allowed channels
+        if interaction.channel.id not in GIFT_CHANNELS:
+            await interaction.response.send_message("You **cannot** gift here! ❌", ephemeral=True)
+            return
+        
+        # Check cooldown
+        user_id = interaction.user.id
+        current_time = time.time()
+        
+        if user_id in gift_cooldowns:
+            time_left = 3 - (current_time - gift_cooldowns[user_id])
+            if time_left > 0:
+                await interaction.response.send_message("Wait **3 seconds** to use this command. ❌", ephemeral=True)
+                return
+        
+        # Parse the amount
+        parsed_amount = parse_amount(amount)
+        
+        if parsed_amount is None or parsed_amount <= 0:
+            await interaction.response.send_message("❌ Invalid amount. Use formats like: `10m`, `1.5b`, `5000000`", ephemeral=True)
+            return
+        
+        # Check if user has enough gems
+        sender_balance = get_balance(interaction.user.id)
+        
+        if sender_balance < parsed_amount:
+            embed = discord.Embed(
+                title="💸 Insufficient Gems",
+                description=f"You only have **{format_gems(sender_balance)} gems** but tried to gift **{format_gems(parsed_amount)} gems**! 😅",
+                color=0xE74C3C
+            )
+            embed.set_footer(text="Play more mini-games to earn gems! 🎮")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        # Check if user is trying to gift to themselves
+        if interaction.user.id == user.id:
+            await interaction.response.send_message("❌ You cannot gift gems to yourself!", ephemeral=True)
+            return
+        
+        # Perform the transaction
+        remove_gems(interaction.user.id, parsed_amount)
+        add_gems(user.id, parsed_amount)
+        
+        # Set cooldown
+        gift_cooldowns[user_id] = current_time
+        
+        # Send public gift message
+        await interaction.response.send_message(f"{interaction.user.mention} gifted **{format_gems(parsed_amount)}** 💎 gems to {user.mention}")
+        
+        # Log the gift
+        try:
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="🎁 Gem Gift",
+                    color=0xE91E63
+                )
+                log_embed.add_field(name="🎁 Sender", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
+                log_embed.add_field(name="🎯 Recipient", value=f"{user.mention}\n`{user.id}`", inline=True)
+                log_embed.add_field(name="💰 Amount", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
+                log_embed.add_field(name="📍 Channel", value=f"<#{interaction.channel.id}>", inline=True)
+                log_embed.add_field(name="💳 Sender Balance After", value=f"**{format_gems(get_balance(interaction.user.id))}** 💎", inline=True)
+                log_embed.add_field(name="💳 Recipient Balance After", value=f"**{format_gems(get_balance(user.id))}** 💎", inline=True)
+                log_embed.timestamp = discord.utils.utcnow()
+                await log_channel.send(embed=log_embed)
+        except Exception as e:
+            print(f"Error logging gift: {e}")
+            
+    except Exception as e:
+        print(f"Error in gift command: {e}")
+        await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
+
+@bot.tree.command(name="redeem", description="Redeem your gems (minimum 10M)")
+async def redeem(interaction: discord.Interaction, amount: str):
+    try:
+        parsed_amount = parse_amount(amount)
+        
+        if parsed_amount is None:
+            embed = discord.Embed(
+                title="❌ Invalid Format",
+                description="Please use formats like: `10m`, `1.5b`, `5,000,000`, or `50000000`\n\n**Examples:**\n• `10m` = 10 million\n• `1b` = 1 billion\n• `5,000,000` = 5 million\n• `2.5m` = 2.5 million",
+                color=0xE74C3C
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        if parsed_amount < 10000000:
+            embed = discord.Embed(
+                title="❌ Minimum Amount Required",
+                description=f"The minimum redemption amount is **10M gems**! 💎\n\nYou tried to redeem: **{format_gems(parsed_amount)} gems**",
+                color=0xE74C3C
+            )
+            embed.set_footer(text="Play more mini-games to earn gems! 🎮")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        user_balance = get_balance(interaction.user.id)
+        
+        if user_balance < parsed_amount:
+            embed = discord.Embed(
+                title="💸 Insufficient Gems",
+                description=f"You only have **{format_gems(user_balance)} gems** but tried to redeem **{format_gems(parsed_amount)} gems**! 😅",
+                color=0xE74C3C
+            )
+            embed.set_footer(text="Play more mini-games to earn gems! 🎮")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        remove_gems(interaction.user.id, parsed_amount)
+        
+        embed = discord.Embed(
+            title="✅ Redemption Successful!",
+            color=0x00FF00
+        )
+        embed.add_field(
+            name="💎 Gems Redeemed", 
+            value=f"**{format_gems(parsed_amount)} Gems**", 
+            inline=True
+        )
+        embed.add_field(
+            name="💰 Remaining Balance", 
+            value=f"**{format_gems(get_balance(interaction.user.id))} Gems**", 
+            inline=True
+        )
+        embed.set_footer(text="Thank you for redeeming! 🎉")
+        if interaction.user.avatar:
+            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.avatar.url)
+        else:
+            embed.set_author(name=interaction.user.display_name)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        # Send notification to redeem channel
+        redeem_channel = bot.get_channel(REDEEM_CHANNEL_ID)
+        if redeem_channel:
+            notification_embed = discord.Embed(
+                title="💎 Gem Redemption",
+                color=0xF1C40F
+            )
+            notification_embed.add_field(
+                name="👤 User", 
+                value=f"{interaction.user.mention}\n`{interaction.user.id}`", 
+                inline=True
+            )
+            notification_embed.add_field(
+                name="💰 Amount", 
+                value=f"**{format_gems(parsed_amount)} Gems**", 
+                inline=True
+            )
+            notification_embed.add_field(
+                name="💳 Remaining Balance", 
+                value=f"**{format_gems(get_balance(interaction.user.id))} Gems**", 
+                inline=True
+            )
+            notification_embed.timestamp = discord.utils.utcnow()
+            
+            await redeem_channel.send(embed=notification_embed)
+            
+        # Also log to general log channel
+        try:
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="💎 Gem Redemption Log",
+                    color=0xF39C12
+                )
+                log_embed.add_field(name="👤 User", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
+                log_embed.add_field(name="💰 Redeemed", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
+                log_embed.add_field(name="💳 Balance After", value=f"**{format_gems(get_balance(interaction.user.id))}** 💎", inline=True)
+                log_embed.add_field(name="📍 Channel", value=f"<#{
