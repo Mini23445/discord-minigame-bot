@@ -7,6 +7,23 @@ import os
 from typing import Optional
 import time
 import shutil
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import socketserver
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Bot is running!')
+
+def run_health_server():
+    port = int(os.environ.get('PORT', 8000))
+    with HTTPServer(('', port), HealthCheckHandler) as server:
+        server.serve_forever()
+
+# Start health check server in background
+Thread(target=run_health_server, daemon=True).start()
 
 # Bot configuration
 GAME_CHANNEL_ID = 1410690717847785512  # Updated game channel
