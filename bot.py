@@ -230,16 +230,13 @@ async def check_game_answer(message):
             if message.channel.id in active_games:
                 del active_games[message.channel.id]
                 
-                # Reset message counter after a game ends
-                global message_count
-                message_count = 0
-                print("Game won - message counter reset to 0")
-                
                 # Cancel the timeout task to prevent it from running
                 if message.channel.id in game_timeouts:
                     timeout_task = game_timeouts[message.channel.id]
                     timeout_task.cancel()
                     del game_timeouts[message.channel.id]
+                
+                print(f"Game won by {message.author.display_name} - {game_type} game")
                 
                 print(f"Game ended early - {message.author.display_name} won {game_type} game")
                 
@@ -268,9 +265,13 @@ async def check_game_answer(message):
             del active_games[message.channel.id]
 
 async def start_mini_game(channel):
-    global active_games, last_games
+    global active_games, last_games, message_count
     
     try:
+        # Reset message counter when starting any game
+        message_count = 0
+        print(f"Starting mini-game - message counter reset to 0")
+        
         await channel.send(f"<@&{PING_ROLE_ID}>")
         
         all_games = ["number", "unscramble", "color"]
@@ -363,11 +364,7 @@ async def game_timeout(channel_id, answer, game_type):
                 
                 # Always remove the game after timeout
                 del active_games[channel_id]
-                
-                # Reset message counter after game timeout
-                global message_count
-                message_count = 0
-                print(f"Game timeout: {game_type} game ended, message counter reset to 0")
+                print(f"Game timeout: {game_type} game ended, answer was {answer}")
     except Exception as e:
         print(f"Error in game timeout: {e}")
         # Force remove the game even if there's an error
