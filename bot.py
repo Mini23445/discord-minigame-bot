@@ -173,11 +173,14 @@ async def on_message(message):
 
         if message.channel.id == GAME_CHANNEL_ID:
             message_count += 1
+            save_message_count()  # Save count after each message
             
             await check_game_answer(message)
             
-            if message_count >= 15 and message.channel.id not in active_games:
+            # Changed from 15 to 100 messages
+            if message_count >= 100 and message.channel.id not in active_games:
                 message_count = 0
+                save_message_count()  # Save the reset
                 await start_mini_game(message.channel)
         
         await bot.process_commands(message)
@@ -240,7 +243,7 @@ async def check_game_answer(message):
                     embed.description = f"**{message.author.display_name}** won! The answer was **{correct_answer}** 🎉"
                 
                 embed.add_field(name="💰 Earned", value="`+15M` 💎", inline=True)
-                embed.add_field(name="Next Game", value="`15 messages`", inline=True)
+                embed.add_field(name="Next Game", value="`100 messages`", inline=True)  # Updated to 100
                 
                 if message.author.avatar:
                     embed.set_thumbnail(url=message.author.avatar.url)
@@ -250,7 +253,7 @@ async def check_game_answer(message):
             except Exception as e:
                 print(f"Error sending winner message: {e}")
                 # Fallback message if embed fails
-                await message.channel.send(f"{message.author.mention} won! +20M gems")
+                await message.channel.send(f"{message.author.mention} won! +15M gems")
             
             # Remove the game IMMEDIATELY after winner is declared
             # This prevents the timeout function from running
@@ -297,6 +300,7 @@ async def start_mini_game(channel):
     try:
         # Reset message counter when starting any game
         message_count = 0
+        save_message_count()  # Save the reset
         print(f"Starting mini-game - message counter reset to 0")
         
         await channel.send(f"<@&{PING_ROLE_ID}>")
@@ -386,7 +390,7 @@ async def game_timeout(channel_id, answer, game_type):
                     elif game_type == "color":
                         embed.add_field(name="🎨 Answer", value=f"The color was **{answer}**", inline=False)
                     
-                    embed.set_footer(text="Next Mini-Game in 100 messages")
+                    embed.set_footer(text="Next Mini-Game in 100 messages")  # Updated to 100
                     await channel.send(embed=embed)
                 
                 # Always remove the game after timeout
@@ -663,6 +667,7 @@ async def begin(interaction: discord.Interaction, game: str):
         # Reset message counter
         global message_count
         message_count = 0
+        save_message_count()  # Save the reset
         
         if game_type in ["number", "num", "n"]:
             await interaction.response.send_message("Starting Number Challenge...", ephemeral=True)
