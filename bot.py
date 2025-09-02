@@ -11,9 +11,9 @@ from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Bot configuration
-GAME_CHANNEL_ID = 1410685631486628042  # Updated game channel
-REDEEM_CHANNEL_ID = 1412142445327683687  # Updated redeem logs channel
-LOG_CHANNEL_ID = 1412142500952408215     # New general logs channel
+GAME_CHANNEL_ID = 1410685631486628042
+REDEEM_CHANNEL_ID = 1412142445327683687
+LOG_CHANNEL_ID = 1412142500952408215
 PING_ROLE_ID = 1412030131937083392
 
 # Gift allowed channels
@@ -27,7 +27,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Game data
 message_count = 0
 active_games = {}
-game_timeouts = {}  # Store timeout tasks so we can cancel them
+game_timeouts = {}
 user_balances = {}
 last_games = []
 
@@ -96,15 +96,280 @@ def load_balances():
 
 def save_balances():
     try:
-        # Create backup first
         if os.path.exists('balances.json'):
             shutil.copy('balances.json', 'balances_backup.json')
         
         with open('balances.json', 'w') as f:
             json.dump(user_balances, f, indent=2)
     except Exception as e:
+        print(f"Error in redeem command: {e}")
+        await interaction.response.send_message("An error occurred during redemption.", ephemeral=True)
+
+@bot.tree.command(name="forcestop", description="Force stop current mini-game (admin only)")
+async def forcestop(interaction: discord.Interaction):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        channel_id = interaction.channel.id
+        if channel_id in active_games:
+            del active_games[channel_id]
+            
+            if channel_id in game_timeouts:
+                timeout_task = game_timeouts[channel_id]
+                timeout_task.cancel()
+                del game_timeouts[channel_id]
+            
+            await interaction.response.send_message("✅ Current mini-game has been stopped.", ephemeral=True)
+        else:
+            await interaction.response.send_message("ℹ️ No active mini-game to stop.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in forcestop command: {e}")
+        await interaction.response.send_message("An error occurred.", ephemeral=True)
+
+@bot.tree.command(name="begin", description="Start a specific mini-game (admin only)")
+async def begin(interaction: discord.Interaction, game: str):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        channel_id = interaction.channel.id
+        
+        if channel_id in active_games:
+            await interaction.response.send_message("A mini-game is already active in this channel. Use `/forcestop` first.", ephemeral=True)
+            return
+        
+        game_type = game.lower().strip()
+        
+        global message_count
+        message_count = 0
+        
+        if game_type in ["number", "num", "n"]:
+            await interaction.response.send_message("Starting Number Challenge...", ephemeral=True)
+            await start_number_game(interaction.channel)
+        elif game_type in ["unscramble", "word", "scramble", "w", "u"]:
+            await interaction.response.send_message("Starting Word Scramble...", ephemeral=True)
+            await start_unscramble_game(interaction.channel)
+        elif game_type in ["color", "colour", "c"]:
+            await interaction.response.send_message("Starting Color Challenge...", ephemeral=True)
+            await start_color_game(interaction.channel)
+        else:
+            await interaction.response.send_message("Invalid game type. Use: `number`, `unscramble`, or `color`", ephemeral=True)
+            
+    except Exception as e:
+        print(f"Error in begin command: {e}")
+        await interaction.response.send_message("An error occurred.", ephemeral=True)
+
+@bot.tree.command(name="balances", description="View all user balances (admin only)")
+async def balances(interaction: discord.Interaction):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        if not user_balances:
+            await interaction.response.send_message("📊 No user balances found.", ephemeral=True)
+            return
+        
+        sorted_balances = sorted(user_balances.items(), key=lambda x: x[1], reverse=True)
+        
+        balances_per_page = 15
+        total_pages = (len(sorted_balances) + balances_per_page - 1) // balances_per_page
+        
+        embed = discord.Embed(
+            title="💰 All User Balances",
+            color=0x5865F2
+        )
+        
+        balance_list = []
+        for i, (user_id, balance) in enumerate(sorted_balances[:balances_per_page]):
+            try:
+                user = await bot.fetch_user(int(user_id))
+                username = user.display_name
+            except:
+                username = f"Unknown User ({user_id})"
+            
+            balance_list.append(f"`#{i+1}` **{username}** - {format_gems(balance)} 💎")
+        
+        if balance_list:
+            embed.description = "\n".join(balance_list)
+        else:
+            embed.description = "No balances to display."
+        
+        embed.set_footer(text=f"Page 1 of {total_pages} • Total Users: {len(user_balances)}")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        print(f"Error in balances command: {e}")
+        await interaction.response.send_message("❌ An error occurred while fetching balances.", ephemeral=True)
+
+@bot.tree.command(name="addbal", description="Add gems to a user's balance (admin only)")
+async def addbal(interaction: discord.Interaction, user: discord.Member, amount: str):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        parsed_amount = parse_amount(amount)
+        
+        if parsed_amount is None or parsed_amount <= 0:
+            await interaction.response.send_message("❌ Invalid amount. Use formats like: `10m`, `1.5b`, `5000000`", ephemeral=True)
+            return
+        
+        old_balance = get_balance(user.id)
+        add_gems(user.id, parsed_amount)
+        new_balance = get_balance(user.id)
+        
+        embed = discord.Embed(
+            title="✅ Gems Added",
+            color=0x00FF00
+        )
+        embed.add_field(name="👤 User", value=f"{user.mention}\n`{user.id}`", inline=True)
+        embed.add_field(name="➕ Added", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
+        embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
+        embed.set_footer(text=f"Added by {interaction.user.display_name}")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        try:
+            log_channel = bot.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                log_embed = discord.Embed(
+                    title="💎 Gems Added (Admin)",
+                    color=0x00FF00
+                )
+                log_embed.add_field(name="👤 Target User", value=f"{user.mention}\n`{user.id}`", inline=True)
+                log_embed.add_field(name="👨‍💼 Admin", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
+                log_embed.add_field(name="➕ Amount Added", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
+                log_embed.add_field(name="📊 Old Balance", value=f"**{format_gems(old_balance)}** 💎", inline=True)
+                log_embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
+                log_embed.timestamp = discord.utils.utcnow()
+                await log_channel.send(embed=log_embed)
+        except Exception as e:
+            print(f"Error logging balance addition: {e}")
+            
+    except Exception as e:
+        print(f"Error in addbal command: {e}")
+        await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
+
+@bot.tree.command(name="removebal", description="Remove gems from a user's balance (admin only)")
+async def removebal(interaction: discord.Interaction, user: discord.Member, amount: str):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        parsed_amount = parse_amount(amount)
+        
+        if parsed_amount is None or parsed_amount <= 0:
+            await interaction.response.send_message("❌ Invalid amount. Use formats like: `10m`, `1.5b`, `5000000`", ephemeral=True)
+            return
+        
+        old_balance = get_balance(user.id)
+        
+        if old_balance < parsed_amount:
+            embed = discord.Embed(
+                title="❌ Insufficient Balance",
+                description=f"{user.mention} only has **{format_gems(old_balance)} gems** but you tried to remove **{format_gems(parsed_amount)} gems**!",
+                color=0xFF0000
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        success = remove_gems(user.id, parsed_amount)
+        new_balance = get_balance(user.id)
+        
+        if success:
+            embed = discord.Embed(
+                title="✅ Gems Removed",
+                color=0xFF6B6B
+            )
+            embed.add_field(name="👤 User", value=f"{user.mention}\n`{user.id}`", inline=True)
+            embed.add_field(name="➖ Removed", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
+            embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
+            embed.set_footer(text=f"Removed by {interaction.user.display_name}")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            try:
+                log_channel = bot.get_channel(LOG_CHANNEL_ID)
+                if log_channel:
+                    log_embed = discord.Embed(
+                        title="💎 Gems Removed (Admin)",
+                        color=0xFF6B6B
+                    )
+                    log_embed.add_field(name="👤 Target User", value=f"{user.mention}\n`{user.id}`", inline=True)
+                    log_embed.add_field(name="👨‍💼 Admin", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
+                    log_embed.add_field(name="➖ Amount Removed", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
+                    log_embed.add_field(name="📊 Old Balance", value=f"**{format_gems(old_balance)}** 💎", inline=True)
+                    log_embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
+                    log_embed.timestamp = discord.utils.utcnow()
+                    await log_channel.send(embed=log_embed)
+            except Exception as e:
+                print(f"Error logging balance removal: {e}")
+        else:
+            await interaction.response.send_message("❌ Failed to remove gems.", ephemeral=True)
+            
+    except Exception as e:
+        print(f"Error in removebal command: {e}")
+        await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
+
+@bot.tree.command(name="debug", description="Check active games (admin only)")
+async def debug(interaction: discord.Interaction):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Admin only command.", ephemeral=True)
+            return
+        
+        if active_games:
+            game_info = []
+            for channel_id, game_data in active_games.items():
+                channel = bot.get_channel(channel_id)
+                channel_name = channel.name if channel else "Unknown"
+                game_info.append(f"#{channel_name}: {game_data['type']} (Answer: {game_data['answer']})")
+            
+            await interaction.response.send_message(f"**Active Games:**\n" + "\n".join(game_info), ephemeral=True)
+        else:
+            await interaction.response.send_message("No active games.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in debug command: {e}")
+        await interaction.response.send_message("An error occurred.", ephemeral=True)
+
+@bot.event
+async def on_command_error(ctx, error):
+    print(f"Command error: {error}")
+
+@bot.event
+async def on_error(event, *args, **kwargs):
+    print(f"Bot error in {event}: {args}")
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Bot is running!')
+    
+    def log_message(self, format, *args):
+        pass
+
+def start_health_server():
+    port = int(os.environ.get('PORT', 8000))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    server.serve_forever()
+
+Thread(target=start_health_server, daemon=True).start()
+
+if __name__ == "__main__":
+    token = os.getenv('DISCORD_BOT_TOKEN')
+    if token:
+        bot.run(token)
+    else:
+        print("❌ DISCORD_BOT_TOKEN environment variable not found!")
+        print("Please set it in your Railway dashboard.")
         print(f"Error saving balances: {e}")
-        # Try to restore from backup if save failed
         if os.path.exists('balances_backup.json'):
             try:
                 shutil.copy('balances_backup.json', 'balances.json')
@@ -190,18 +455,15 @@ async def check_game_answer(message):
             is_correct = user_answer == correct_answer.lower()
         
         if is_correct:
-            # Double check game is still active and no winner yet
             if message.channel.id not in active_games or active_games[message.channel.id].get('winner'):
                 return
             
-            # Mark as winner IMMEDIATELY to prevent timeout from running
             active_games[message.channel.id]['winner'] = message.author
             
             try:
                 gems_won = 15000000
                 add_gems(message.author.id, gems_won)
                 
-                # Create winner embed
                 embed = discord.Embed(color=0x00D26A)
                 
                 if game_type == "number":
@@ -224,15 +486,11 @@ async def check_game_answer(message):
                 
             except Exception as e:
                 print(f"Error sending winner message: {e}")
-                # Fallback message if embed fails
                 await message.channel.send(f"{message.author.mention} won! +15M gems")
             
-            # Remove the game IMMEDIATELY after winner is declared
-            # This prevents the timeout function from running
             if message.channel.id in active_games:
                 del active_games[message.channel.id]
                 
-                # Cancel the timeout task to prevent it from running
                 if message.channel.id in game_timeouts:
                     timeout_task = game_timeouts[message.channel.id]
                     timeout_task.cancel()
@@ -240,7 +498,6 @@ async def check_game_answer(message):
                 
                 print(f"Game ended early - {message.author.display_name} won {game_type} game")
                 
-                # Log the win to the log channel
                 try:
                     log_channel = bot.get_channel(LOG_CHANNEL_ID)
                     if log_channel:
@@ -252,298 +509,7 @@ async def check_game_answer(message):
                         log_embed.add_field(name="🎮 Game Type", value=f"**{game_type.title()}**", inline=True)
                         log_embed.add_field(name="💰 Gems Awarded", value="**15M** 💎", inline=True)
                         log_embed.add_field(name="🏆 Answer", value=f"**{correct_answer}**", inline=True)
-                        log_embed.add_field(name="📍 Channel", value=f"<#{interaction.channel.id}>", inline=True)
-                log_embed.timestamp = discord.utils.utcnow()
-                await log_channel.send(embed=log_embed)
-        except Exception as e:
-            print(f"Error logging redemption: {e}")
-    except Exception as e:
-        print(f"Error in redeem command: {e}")
-        await interaction.response.send_message("An error occurred during redemption.", ephemeral=True)
-
-@bot.tree.command(name="forcestop", description="Force stop current mini-game (admin only)")
-async def forcestop(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("You need admin permissions to use this command.", ephemeral=True)
-            return
-        
-        channel_id = interaction.channel.id
-        if channel_id in active_games:
-            del active_games[channel_id]
-            
-            # Also cancel and clean up any timeout tasks
-            if channel_id in game_timeouts:
-                timeout_task = game_timeouts[channel_id]
-                timeout_task.cancel()
-                del game_timeouts[channel_id]
-            
-            await interaction.response.send_message("✅ Current mini-game has been stopped.", ephemeral=True)
-        else:
-            await interaction.response.send_message("ℹ️ No active mini-game to stop.", ephemeral=True)
-    except Exception as e:
-        print(f"Error in forcestop command: {e}")
-        await interaction.response.send_message("An error occurred.", ephemeral=True)
-
-# Add /begin command
-@bot.tree.command(name="begin", description="Start a specific mini-game (admin only)")
-async def begin(interaction: discord.Interaction, game: str):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("You need admin permissions to use this command.", ephemeral=True)
-            return
-        
-        channel_id = interaction.channel.id
-        
-        # Check if game is already active
-        if channel_id in active_games:
-            await interaction.response.send_message("A mini-game is already active in this channel. Use `/forcestop` first.", ephemeral=True)
-            return
-        
-        game_type = game.lower().strip()
-        
-        # Reset message counter
-        global message_count
-        message_count = 0
-        
-        if game_type in ["number", "num", "n"]:
-            await interaction.response.send_message("Starting Number Challenge...", ephemeral=True)
-            await start_number_game(interaction.channel)
-        elif game_type in ["unscramble", "word", "scramble", "w", "u"]:
-            await interaction.response.send_message("Starting Word Scramble...", ephemeral=True)
-            await start_unscramble_game(interaction.channel)
-        elif game_type in ["color", "colour", "c"]:
-            await interaction.response.send_message("Starting Color Challenge...", ephemeral=True)
-            await start_color_game(interaction.channel)
-        else:
-            await interaction.response.send_message("Invalid game type. Use: `number`, `unscramble`, or `color`", ephemeral=True)
-            
-    except Exception as e:
-        print(f"Error in begin command: {e}")
-        await interaction.response.send_message("An error occurred.", ephemeral=True)
-
-@bot.tree.command(name="balances", description="View all user balances (admin only)")
-async def balances(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
-            return
-        
-        if not user_balances:
-            await interaction.response.send_message("📊 No user balances found.", ephemeral=True)
-            return
-        
-        # Sort balances from highest to lowest
-        sorted_balances = sorted(user_balances.items(), key=lambda x: x[1], reverse=True)
-        
-        # Create pages of balances (Discord has character limits)
-        balances_per_page = 15
-        total_pages = (len(sorted_balances) + balances_per_page - 1) // balances_per_page
-        
-        # First page
-        embed = discord.Embed(
-            title="💰 All User Balances",
-            color=0x5865F2
-        )
-        
-        balance_list = []
-        for i, (user_id, balance) in enumerate(sorted_balances[:balances_per_page]):
-            try:
-                user = await bot.fetch_user(int(user_id))
-                username = user.display_name
-            except:
-                username = f"Unknown User ({user_id})"
-            
-            balance_list.append(f"`#{i+1}` **{username}** - {format_gems(balance)} 💎")
-        
-        if balance_list:
-            embed.description = "\n".join(balance_list)
-        else:
-            embed.description = "No balances to display."
-        
-        embed.set_footer(text=f"Page 1 of {total_pages} • Total Users: {len(user_balances)}")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-    except Exception as e:
-        print(f"Error in balances command: {e}")
-        await interaction.response.send_message("❌ An error occurred while fetching balances.", ephemeral=True)
-
-@bot.tree.command(name="addbal", description="Add gems to a user's balance (admin only)")
-async def addbal(interaction: discord.Interaction, user: discord.Member, amount: str):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
-            return
-        
-        # Parse the amount
-        parsed_amount = parse_amount(amount)
-        
-        if parsed_amount is None or parsed_amount <= 0:
-            await interaction.response.send_message("❌ Invalid amount. Use formats like: `10m`, `1.5b`, `5000000`", ephemeral=True)
-            return
-        
-        # Add gems to user
-        old_balance = get_balance(user.id)
-        add_gems(user.id, parsed_amount)
-        new_balance = get_balance(user.id)
-        
-        # Success message
-        embed = discord.Embed(
-            title="✅ Gems Added",
-            color=0x00FF00
-        )
-        embed.add_field(name="👤 User", value=f"{user.mention}\n`{user.id}`", inline=True)
-        embed.add_field(name="➕ Added", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
-        embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
-        embed.set_footer(text=f"Added by {interaction.user.display_name}")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        # Log to log channel
-        try:
-            log_channel = bot.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                log_embed = discord.Embed(
-                    title="💎 Gems Added (Admin)",
-                    color=0x00FF00
-                )
-                log_embed.add_field(name="👤 Target User", value=f"{user.mention}\n`{user.id}`", inline=True)
-                log_embed.add_field(name="👨‍💼 Admin", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
-                log_embed.add_field(name="➕ Amount Added", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
-                log_embed.add_field(name="📊 Old Balance", value=f"**{format_gems(old_balance)}** 💎", inline=True)
-                log_embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
-                log_embed.timestamp = discord.utils.utcnow()
-                await log_channel.send(embed=log_embed)
-        except Exception as e:
-            print(f"Error logging balance addition: {e}")
-            
-    except Exception as e:
-        print(f"Error in addbal command: {e}")
-        await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
-
-@bot.tree.command(name="removebal", description="Remove gems from a user's balance (admin only)")
-async def removebal(interaction: discord.Interaction, user: discord.Member, amount: str):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
-            return
-        
-        # Parse the amount
-        parsed_amount = parse_amount(amount)
-        
-        if parsed_amount is None or parsed_amount <= 0:
-            await interaction.response.send_message("❌ Invalid amount. Use formats like: `10m`, `1.5b`, `5000000`", ephemeral=True)
-            return
-        
-        # Check current balance
-        old_balance = get_balance(user.id)
-        
-        if old_balance < parsed_amount:
-            embed = discord.Embed(
-                title="❌ Insufficient Balance",
-                description=f"{user.mention} only has **{format_gems(old_balance)} gems** but you tried to remove **{format_gems(parsed_amount)} gems**!",
-                color=0xFF0000
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        # Remove gems from user
-        success = remove_gems(user.id, parsed_amount)
-        new_balance = get_balance(user.id)
-        
-        if success:
-            # Success message
-            embed = discord.Embed(
-                title="✅ Gems Removed",
-                color=0xFF6B6B
-            )
-            embed.add_field(name="👤 User", value=f"{user.mention}\n`{user.id}`", inline=True)
-            embed.add_field(name="➖ Removed", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
-            embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
-            embed.set_footer(text=f"Removed by {interaction.user.display_name}")
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            
-            # Log to log channel
-            try:
-                log_channel = bot.get_channel(LOG_CHANNEL_ID)
-                if log_channel:
-                    log_embed = discord.Embed(
-                        title="💎 Gems Removed (Admin)",
-                        color=0xFF6B6B
-                    )
-                    log_embed.add_field(name="👤 Target User", value=f"{user.mention}\n`{user.id}`", inline=True)
-                    log_embed.add_field(name="👨‍💼 Admin", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
-                    log_embed.add_field(name="➖ Amount Removed", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
-                    log_embed.add_field(name="📊 Old Balance", value=f"**{format_gems(old_balance)}** 💎", inline=True)
-                    log_embed.add_field(name="💰 New Balance", value=f"**{format_gems(new_balance)}** 💎", inline=True)
-                    log_embed.timestamp = discord.utils.utcnow()
-                    await log_channel.send(embed=log_embed)
-            except Exception as e:
-                print(f"Error logging balance removal: {e}")
-        else:
-            await interaction.response.send_message("❌ Failed to remove gems.", ephemeral=True)
-            
-    except Exception as e:
-        print(f"Error in removebal command: {e}")
-        await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
-
-@bot.tree.command(name="debug", description="Check active games (admin only)")
-async def debug(interaction: discord.Interaction):
-    try:
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("Admin only command.", ephemeral=True)
-            return
-        
-        if active_games:
-            game_info = []
-            for channel_id, game_data in active_games.items():
-                channel = bot.get_channel(channel_id)
-                channel_name = channel.name if channel else "Unknown"
-                game_info.append(f"#{channel_name}: {game_data['type']} (Answer: {game_data['answer']})")
-            
-            await interaction.response.send_message(f"**Active Games:**\n" + "\n".join(game_info), ephemeral=True)
-        else:
-            await interaction.response.send_message("No active games.", ephemeral=True)
-    except Exception as e:
-        print(f"Error in debug command: {e}")
-        await interaction.response.send_message("An error occurred.", ephemeral=True)
-
-@bot.event
-async def on_command_error(ctx, error):
-    print(f"Command error: {error}")
-
-@bot.event
-async def on_error(event, *args, **kwargs):
-    print(f"Bot error in {event}: {args}")
-
-# Health check server for UptimeRobot
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'Bot is running!')
-    
-    def log_message(self, format, *args):
-        pass  # Disable logging
-
-def start_health_server():
-    port = int(os.environ.get('PORT', 8000))
-    server = HTTPServer(('0.0.0.0', port), HealthHandler)
-    server.serve_forever()
-
-# Start health server in background
-Thread(target=start_health_server, daemon=True).start()
-
-# Run the bot - Get token from environment variable
-if __name__ == "__main__":
-    token = os.getenv('DISCORD_BOT_TOKEN')
-    if token:
-        bot.run(token)
-    else:
-        print("❌ DISCORD_BOT_TOKEN environment variable not found!")
-        print("Please set it in your Railway dashboard.")message.channel.id}>", inline=True)
+                        log_embed.add_field(name="📍 Channel", value=f"<#{message.channel.id}>", inline=True)
                         log_embed.timestamp = discord.utils.utcnow()
                         await log_channel.send(embed=log_embed)
                 except Exception as e:
@@ -551,7 +517,6 @@ if __name__ == "__main__":
                     
     except Exception as e:
         print(f"Error in check_game_answer: {e}")
-        # If something goes wrong, try to clean up the game
         if message.channel.id in active_games:
             del active_games[message.channel.id]
 
@@ -601,11 +566,9 @@ async def start_number_game(channel):
         
         await channel.send(embed=embed)
         
-        # Store the timeout task so we can cancel it if someone wins
         timeout_task = asyncio.create_task(game_timeout(channel.id, number, "number"))
         game_timeouts[channel.id] = timeout_task
         
-        # Log game start
         try:
             log_channel = bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
@@ -624,11 +587,9 @@ async def start_number_game(channel):
         print(f"Error starting number game: {e}")
 
 async def game_timeout(channel_id, answer, game_type):
-    """Handle game timeout independently"""
     try:
         await asyncio.sleep(18)
         
-        # Check if game is still active and no winner
         if channel_id in active_games:
             game_data = active_games[channel_id]
             if not game_data.get('winner'):
@@ -649,12 +610,10 @@ async def game_timeout(channel_id, answer, game_type):
                     embed.set_footer(text="Next Mini-Game in 100 messages")
                     await channel.send(embed=embed)
                 
-                # Always remove the game after timeout
                 del active_games[channel_id]
                 print(f"Game timeout: {game_type} game ended, answer was {answer}")
     except Exception as e:
         print(f"Error in game timeout: {e}")
-        # Force remove the game even if there's an error
         if channel_id in active_games:
             del active_games[channel_id]
 
@@ -663,7 +622,6 @@ async def start_unscramble_game(channel):
         word = random.choice(WORDS)
         scrambled = list(word)
         
-        # Better scrambling algorithm to ensure it's actually scrambled
         max_attempts = 50
         attempts = 0
         while ''.join(scrambled) == word and attempts < max_attempts:
@@ -687,11 +645,9 @@ async def start_unscramble_game(channel):
         
         await channel.send(embed=embed)
         
-        # Store the timeout task so we can cancel it if someone wins
         timeout_task = asyncio.create_task(game_timeout(channel.id, word, "unscramble"))
         game_timeouts[channel.id] = timeout_task
         
-        # Log game start
         try:
             log_channel = bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
@@ -727,11 +683,9 @@ async def start_color_game(channel):
         
         await channel.send(embed=embed)
         
-        # Store the timeout task so we can cancel it if someone wins
         timeout_task = asyncio.create_task(game_timeout(channel.id, color, "color"))
         game_timeouts[channel.id] = timeout_task
         
-        # Log game start
         try:
             log_channel = bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
@@ -773,12 +727,10 @@ async def balance(interaction: discord.Interaction):
 @bot.tree.command(name="gift", description="Gift gems to another user")
 async def gift(interaction: discord.Interaction, user: discord.Member, amount: str):
     try:
-        # Check if command is used in allowed channels
         if interaction.channel.id not in GIFT_CHANNELS:
             await interaction.response.send_message("You **cannot** gift here! ❌", ephemeral=True)
             return
         
-        # Check cooldown
         user_id = interaction.user.id
         current_time = time.time()
         
@@ -788,14 +740,12 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: s
                 await interaction.response.send_message("Wait **3 seconds** to use this command. ❌", ephemeral=True)
                 return
         
-        # Parse the amount
         parsed_amount = parse_amount(amount)
         
         if parsed_amount is None or parsed_amount <= 0:
             await interaction.response.send_message("❌ Invalid amount. Use formats like: `10m`, `1.5b`, `5000000`", ephemeral=True)
             return
         
-        # Check if user has enough gems
         sender_balance = get_balance(interaction.user.id)
         
         if sender_balance < parsed_amount:
@@ -808,22 +758,17 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: s
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
         
-        # Check if user is trying to gift to themselves
         if interaction.user.id == user.id:
             await interaction.response.send_message("❌ You cannot gift gems to yourself!", ephemeral=True)
             return
         
-        # Perform the transaction
         remove_gems(interaction.user.id, parsed_amount)
         add_gems(user.id, parsed_amount)
         
-        # Set cooldown
         gift_cooldowns[user_id] = current_time
         
-        # Send public gift message
         await interaction.response.send_message(f"{interaction.user.mention} gifted **{format_gems(parsed_amount)}** 💎 gems to {user.mention}")
         
-        # Log the gift
         try:
             log_channel = bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
@@ -906,7 +851,6 @@ async def redeem(interaction: discord.Interaction, amount: str):
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
         
-        # Send notification to redeem channel
         redeem_channel = bot.get_channel(REDEEM_CHANNEL_ID)
         if redeem_channel:
             notification_embed = discord.Embed(
@@ -932,7 +876,6 @@ async def redeem(interaction: discord.Interaction, amount: str):
             
             await redeem_channel.send(embed=notification_embed)
             
-        # Also log to general log channel
         try:
             log_channel = bot.get_channel(LOG_CHANNEL_ID)
             if log_channel:
@@ -943,4 +886,9 @@ async def redeem(interaction: discord.Interaction, amount: str):
                 log_embed.add_field(name="👤 User", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
                 log_embed.add_field(name="💰 Redeemed", value=f"**{format_gems(parsed_amount)}** 💎", inline=True)
                 log_embed.add_field(name="💳 Balance After", value=f"**{format_gems(get_balance(interaction.user.id))}** 💎", inline=True)
-                log_embed.add_field(name="📍 Channel", value=f"<#{
+                log_embed.add_field(name="📍 Channel", value=f"<#{interaction.channel.id}>", inline=True)
+                log_embed.timestamp = discord.utils.utcnow()
+                await log_channel.send(embed=log_embed)
+        except Exception as e:
+            print(f"Error logging redemption: {e}")
+    except Exception as e:
