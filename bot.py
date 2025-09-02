@@ -125,11 +125,38 @@ def remove_gems(user_id, amount):
         return True
     return False
 
+def load_message_count():
+    global message_count
+    try:
+        with open('message_count.json', 'r') as f:
+            data = json.load(f)
+            message_count = data.get('count', 0)
+    except FileNotFoundError:
+        message_count = 0
+    except json.JSONDecodeError:
+        print("Warning: message_count.json is corrupted. Starting with 0.")
+        message_count = 0
+
+def save_message_count():
+    try:
+        with open('message_count.json', 'w') as f:
+            json.dump({'count': message_count}, f)
+    except Exception as e:
+        print(f"Error saving message count: {e}")
+
+def reset_message_count():
+    global message_count
+    message_count = 0
+    save_message_count()
+    print("Message counter reset to 0 and saved")
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} has landed!')
     print(f'Connected to {len(bot.guilds)} servers')
     load_balances()
+    load_message_count()
+    print(f'Loaded message count: {message_count}')
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash commands!")
@@ -606,6 +633,9 @@ async def forcestop(interaction: discord.Interaction):
                 timeout_task.cancel()
                 del game_timeouts[channel_id]
             
+            # Reset message counter when admin force stops
+            reset_message_count()
+            
             await interaction.response.send_message("✅ Current mini-game has been stopped.", ephemeral=True)
         else:
             await interaction.response.send_message("ℹ️ No active mini-game to stop.", ephemeral=True)
@@ -886,6 +916,62 @@ async def removebal(interaction: discord.Interaction, user: discord.Member, amou
     except Exception as e:
         print(f"Error in removebal command: {e}")
         await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
+
+@bot.tree.command(name="messages", description="View message count progress (admin only)")
+async def messages(interaction: discord.Interaction):
+    try:
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ You need admin permissions to use this command.", ephemeral=True)
+            return
+        
+        current_count = message_count
+        messages_needed = 100 - current_count
+        
+        embed = discord.Embed(
+            title="📊 Message Counter Status",
+            color=0x3498DB
+        )
+        embed.add_field(
+            name="📈 Current Messages", 
+            value=f"**{current_count}**/100", 
+            inline=True
+        )
+        embed.add_field(
+            name="⏳ Messages Until Next Game", 
+            value=f"**{messages_needed}** more", 
+            inline=True
+        )
+        
+        # Add progress bar
+        progress = int((current_count / 100) * 20)  # 20-character progress bar
+        progress_bar = "█" * progress + "░" * (20 - progress)
+        embed.add_field(
+            name="📊 Progress", 
+            value=f"`{progress_bar}` {current_count}%", 
+            inline=False
+        )
+        
+        # Check if game is currently active
+        if GAME_CHANNEL_ID in active_games:
+            embed.add_field(
+                name="🎮 Current Status", 
+                value="**Game Active** - Counter paused", 
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="🎮 Current Status", 
+                value="**Counting messages** - Ready for next game", 
+                inline=False
+            )
+        
+        embed.set_footer(text="Counter resets to 0 when games start")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        print(f"Error in messages command: {e}")
+        await interaction.response.send_message("❌ An error occurred while checking message count.", ephemeral=True)
 
 @bot.tree.command(name="debug", description="Check active games (admin only)")
 async def debug(interaction: discord.Interaction):
