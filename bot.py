@@ -432,11 +432,7 @@ if __name__ == "__main__":
     if not TOKEN:
         print("❌ Please set the DISCORD_BOT_TOKEN environment variable!")
     else:
-        try:
-            bot.run(TOKEN)
-        finally:
-            # Save data on shutdown
-            asyncio.run(save_cache())d = discord.Embed(
+        bot.run(TOKEN)d = discord.Embed(
             title=f"🔷 {title}",
             description=description,
             color=color,
