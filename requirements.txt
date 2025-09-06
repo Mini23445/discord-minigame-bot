@@ -1,2 +1,1 @@
 discord.py>=2.3.0
-aiofiles>=0.8.0
