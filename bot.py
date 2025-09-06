@@ -4,7 +4,9 @@ import json
 import os
 import random
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
+import signal
+import sys
 
 # Bot configuration
 intents = discord.Intents.default()
@@ -16,6 +18,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Configuration
 ADMIN_ROLE_ID = 1410911675351306250
 LOG_CHANNEL_ID = 1413818486404415590
+PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
 
 # File paths for data storage
 USER_DATA_FILE = 'user_data.json'
@@ -26,12 +29,34 @@ user_data_cache = {}
 shop_data_cache = []
 cache_dirty = False
 
-async def log_action(action_type, title, description, color=0x0099ff, user=None, fields=None):
+# Cooldown tracking
+daily_cooldowns = {}
+work_cooldowns = {}
+crime_cooldowns = {}
+
+# Work jobs list
+WORK_JOBS = [
+    "delivered pizzas", "walked dogs", "cleaned houses", "tutored students",
+    "fixed computers", "painted fences", "washed cars", "mowed lawns",
+    "helped elderly", "organized files", "stocked shelves", "served coffee",
+    "delivered packages", "babysat kids", "cleaned pools", "raked leaves"
+]
+
+# Crime activities list
+CRIME_ACTIVITIES = [
+    "pickpocketed a stranger", "hacked a vending machine", "sneaked into a movie",
+    "stole candy from a store", "jumped a subway turnstile", "copied homework",
+    "took extra napkins", "used someone's WiFi", "downloaded music illegally",
+    "parked in a no-parking zone", "jaywalked across the street", "littered"
+]
+
+async def log_action(action_type, title, description, color=0x0099ff, user=None, fields=None, channel_id=None):
     """Log actions to the specified channel"""
     try:
-        channel = bot.get_channel(LOG_CHANNEL_ID)
+        target_channel_id = channel_id or LOG_CHANNEL_ID
+        channel = bot.get_channel(target_channel_id)
         if not channel:
-            print(f"⚠️ Log channel {LOG_CHANNEL_ID} not found!")
+            print(f"⚠️ Log channel {target_channel_id} not found!")
             return
         
         embed = discord.Embed(
@@ -85,9 +110,15 @@ def save_data(filename, data):
 
 def init_cache():
     """Initialize data cache"""
-    global user_data_cache, shop_data_cache
+    global user_data_cache, shop_data_cache, daily_cooldowns, work_cooldowns, crime_cooldowns
     user_data_cache = load_data(USER_DATA_FILE, {})
     shop_data_cache = load_data(SHOP_DATA_FILE, [])
+    
+    # Load cooldowns
+    cooldown_data = load_data('cooldowns.json', {})
+    daily_cooldowns = cooldown_data.get('daily', {})
+    work_cooldowns = cooldown_data.get('work', {})
+    crime_cooldowns = cooldown_data.get('crime', {})
 
 def save_cache():
     """Save cache to files"""
@@ -95,7 +126,29 @@ def save_cache():
     if cache_dirty:
         save_data(USER_DATA_FILE, user_data_cache)
         save_data(SHOP_DATA_FILE, shop_data_cache)
+        
+        # Save cooldowns
+        cooldown_data = {
+            'daily': daily_cooldowns,
+            'work': work_cooldowns,
+            'crime': crime_cooldowns
+        }
+        save_data('cooldowns.json', cooldown_data)
         cache_dirty = False
+
+def cleanup_and_exit():
+    """Save all data before exit"""
+    print("🔄 Saving data before shutdown...")
+    save_cache()
+    print("✅ Data saved successfully!")
+
+# Register cleanup handlers
+def signal_handler(sig, frame):
+    cleanup_and_exit()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 def get_user_balance(user_id):
     """Get user's token balance from cache"""
@@ -173,6 +226,59 @@ def get_user_rank(balance):
     else:
         return "🔵 Starter"
 
+def can_use_daily(user_id):
+    """Check if user can use daily command"""
+    user_id_str = str(user_id)
+    if user_id_str not in daily_cooldowns:
+        return True, None
+    
+    last_used = datetime.fromisoformat(daily_cooldowns[user_id_str])
+    next_use = last_used + timedelta(hours=24)
+    
+    if datetime.now() >= next_use:
+        return True, None
+    else:
+        return False, next_use
+
+def can_use_work(user_id):
+    """Check if user can use work command"""
+    user_id_str = str(user_id)
+    if user_id_str not in work_cooldowns:
+        return True, None
+    
+    last_used = datetime.fromisoformat(work_cooldowns[user_id_str])
+    next_use = last_used + timedelta(hours=3)
+    
+    if datetime.now() >= next_use:
+        return True, None
+    else:
+        return False, next_use
+
+def can_use_crime(user_id):
+    """Check if user can use crime command"""
+    user_id_str = str(user_id)
+    if user_id_str not in crime_cooldowns:
+        return True, None
+    
+    last_used = datetime.fromisoformat(crime_cooldowns[user_id_str])
+    next_use = last_used + timedelta(hours=1)  # 1 hour cooldown for crime
+    
+    if datetime.now() >= next_use:
+        return True, None
+    else:
+        return False, next_use
+
+def format_time_remaining(next_use):
+    """Format remaining time until next use"""
+    remaining = next_use - datetime.now()
+    hours, remainder = divmod(int(remaining.total_seconds()), 3600)
+    minutes, _ = divmod(remainder, 60)
+    
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
 # Auto-save task
 async def auto_save_task():
     """Automatically save cache every 30 seconds"""
@@ -221,7 +327,7 @@ async def balance(interaction: discord.Interaction):
     
     embed = discord.Embed(
         title="💰 Token Wallet",
-        color=0x7B68EE,  # Changed from grey to a nice purple color
+        color=0x7B68EE,
         timestamp=datetime.now()
     )
     
@@ -236,8 +342,8 @@ async def balance(interaction: discord.Interaction):
         inline=True
     )
     embed.add_field(
-        name="‎",  # Invisible character for spacing
-        value="‎",
+        name="Total Spent",
+        value=f"{total_spent:,} 🪙",
         inline=True
     )
     embed.add_field(
@@ -246,8 +352,13 @@ async def balance(interaction: discord.Interaction):
         inline=True
     )
     embed.add_field(
-        name="Total Spent",
-        value=f"{total_spent:,} 🪙",
+        name="‎",  # Invisible character for spacing
+        value="‎",
+        inline=True
+    )
+    embed.add_field(
+        name="‎",  # Invisible character for spacing
+        value="‎",
         inline=True
     )
     
@@ -256,6 +367,196 @@ async def balance(interaction: discord.Interaction):
         icon_url=interaction.user.display_avatar.url
     )
     embed.set_footer(text="💬 Chat to earn 1-5 tokens per message")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="adminbalance", description="Check any user's token balance (Admin only)")
+async def adminbalance(interaction: discord.Interaction, user: discord.Member):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    user_balance = get_user_balance(user.id)
+    user_data = user_data_cache.get(str(user.id), {})
+    total_earned = user_data.get('total_earned', 0)
+    total_spent = user_data.get('total_spent', 0)
+    purchases = user_data.get('purchases', [])
+    rank = get_user_rank(user_balance)
+    
+    embed = discord.Embed(
+        title=f"💰 {user.display_name}'s Token Wallet",
+        color=0xFF6B6B,
+        timestamp=datetime.now()
+    )
+    
+    embed.add_field(
+        name="Current Balance",
+        value=f"**{user_balance:,}** 🪙",
+        inline=True
+    )
+    embed.add_field(
+        name="Rank",
+        value=rank,
+        inline=True
+    )
+    embed.add_field(
+        name="Total Spent",
+        value=f"{total_spent:,} 🪙",
+        inline=True
+    )
+    embed.add_field(
+        name="Total Earned",
+        value=f"{total_earned:,} 🪙",
+        inline=True
+    )
+    embed.add_field(
+        name="Total Purchases",
+        value=f"{len(purchases)} items",
+        inline=True
+    )
+    embed.add_field(
+        name="Account Created",
+        value=f"<t:{int(user.created_at.timestamp())}:R>",
+        inline=True
+    )
+    
+    embed.set_author(
+        name=user.display_name,
+        icon_url=user.display_avatar.url
+    )
+    embed.set_footer(text=f"Viewed by {interaction.user.display_name}")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="daily", description="Claim your daily tokens (24h cooldown)")
+async def daily(interaction: discord.Interaction):
+    can_use, next_use = can_use_daily(interaction.user.id)
+    
+    if not can_use:
+        time_remaining = format_time_remaining(next_use)
+        await interaction.response.send_message(
+            f"⏰ You've already claimed your daily reward! Come back in **{time_remaining}**.",
+            ephemeral=True
+        )
+        return
+    
+    # Give random tokens between 1-50
+    tokens_earned = random.randint(1, 50)
+    new_balance = update_user_balance(interaction.user.id, tokens_earned)
+    
+    # Update cooldown
+    daily_cooldowns[str(interaction.user.id)] = datetime.now().isoformat()
+    save_cache()
+    
+    embed = discord.Embed(
+        title="🎁 Daily Reward Claimed!",
+        color=0x00ff00,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="Tokens Earned", value=f"{tokens_earned:,} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    embed.add_field(name="Next Daily", value="<t:" + str(int((datetime.now() + timedelta(hours=24)).timestamp())) + ":R>", inline=False)
+    
+    embed.set_author(
+        name=interaction.user.display_name,
+        icon_url=interaction.user.display_avatar.url
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="work", description="Work a job to earn tokens (3h cooldown)")
+async def work(interaction: discord.Interaction):
+    can_use, next_use = can_use_work(interaction.user.id)
+    
+    if not can_use:
+        time_remaining = format_time_remaining(next_use)
+        await interaction.response.send_message(
+            f"💼 You're still tired from your last job! Rest for **{time_remaining}** more.",
+            ephemeral=True
+        )
+        return
+    
+    # Give random tokens between 1-100
+    tokens_earned = random.randint(1, 100)
+    job = random.choice(WORK_JOBS)
+    new_balance = update_user_balance(interaction.user.id, tokens_earned)
+    
+    # Update cooldown
+    work_cooldowns[str(interaction.user.id)] = datetime.now().isoformat()
+    save_cache()
+    
+    embed = discord.Embed(
+        title="💼 Work Complete!",
+        color=0x4CAF50,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="Job", value=f"You {job}", inline=False)
+    embed.add_field(name="Tokens Earned", value=f"{tokens_earned:,} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    embed.add_field(name="Next Work", value="<t:" + str(int((datetime.now() + timedelta(hours=3)).timestamp())) + ":R>", inline=False)
+    
+    embed.set_author(
+        name=interaction.user.display_name,
+        icon_url=interaction.user.display_avatar.url
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="crime", description="Commit a crime for tokens (1h cooldown, risky!)")
+async def crime(interaction: discord.Interaction):
+    can_use, next_use = can_use_crime(interaction.user.id)
+    
+    if not can_use:
+        time_remaining = format_time_remaining(next_use)
+        await interaction.response.send_message(
+            f"🚔 You need to lay low for **{time_remaining}** more before your next crime!",
+            ephemeral=True
+        )
+        return
+    
+    # Random success/failure
+    success = random.choice([True, False])
+    crime_activity = random.choice(CRIME_ACTIVITIES)
+    
+    if success:
+        tokens_earned = random.randint(15, 100)
+        new_balance = update_user_balance(interaction.user.id, tokens_earned)
+        
+        embed = discord.Embed(
+            title="🎭 Crime Successful!",
+            color=0x00ff00,
+            timestamp=datetime.now()
+        )
+        embed.add_field(name="Crime", value=f"You {crime_activity}", inline=False)
+        embed.add_field(name="Tokens Gained", value=f"+{tokens_earned:,} 🪙", inline=True)
+        embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    else:
+        tokens_lost = random.randint(3, 100)
+        current_balance = get_user_balance(interaction.user.id)
+        
+        # Don't let balance go negative
+        tokens_lost = min(tokens_lost, current_balance)
+        new_balance = update_user_balance(interaction.user.id, -tokens_lost)
+        
+        embed = discord.Embed(
+            title="🚔 Crime Failed!",
+            color=0xff4444,
+            timestamp=datetime.now()
+        )
+        embed.add_field(name="Crime", value=f"You tried to {crime_activity.replace('stole', 'steal').replace('took', 'take')}", inline=False)
+        embed.add_field(name="Tokens Lost", value=f"-{tokens_lost:,} 🪙", inline=True)
+        embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    
+    embed.add_field(name="Next Crime", value="<t:" + str(int((datetime.now() + timedelta(hours=1)).timestamp())) + ":R>", inline=False)
+    
+    embed.set_author(
+        name=interaction.user.display_name,
+        icon_url=interaction.user.display_avatar.url
+    )
+    
+    # Update cooldown
+    crime_cooldowns[str(interaction.user.id)] = datetime.now().isoformat()
+    save_cache()
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -287,8 +588,8 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
     receiver_new_balance = update_user_balance(user.id, amount)
     save_cache()
     
-    # Send public message with emojis
-    gift_message = f"🎁✨ {interaction.user.mention} gifted **{amount:,} tokens** 🪙 to {user.mention}! ✨🎉"
+    # Send public message with emojis (max 3 emojis)
+    gift_message = f"🎁 {interaction.user.mention} gifted **{amount:,} tokens** 🪙 to {user.mention}! 🎉"
     await interaction.response.send_message(gift_message)
     
     # Log the gift action
@@ -305,6 +606,78 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
             {"name": "Receiver's New Balance", "value": f"{receiver_new_balance:,} 🪙", "inline": True}
         ]
     )
+
+class PurchaseConfirmationView(discord.ui.View):
+    def __init__(self, item, user_id):
+        super().__init__(timeout=60)
+        self.item = item
+        self.user_id = user_id
+    
+    @discord.ui.button(label="✅ Confirm Purchase", style=discord.ButtonStyle.green)
+    async def confirm_purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your purchase!", ephemeral=True)
+            return
+        
+        user_balance = get_user_balance(interaction.user.id)
+        
+        if user_balance < self.item['price']:
+            await interaction.response.send_message(
+                f"❌ Insufficient funds! You need **{self.item['price'] - user_balance:,}** more tokens.",
+                ephemeral=True
+            )
+            return
+        
+        new_balance = update_user_balance(interaction.user.id, -self.item['price'])
+        add_purchase_history(interaction.user.id, self.item['name'], self.item['price'])
+        save_cache()
+        
+        embed = discord.Embed(
+            title="✅ Purchase Successful!",
+            color=0x00ff00,
+            timestamp=datetime.now()
+        )
+        embed.add_field(name="Item", value=self.item['name'], inline=True)
+        embed.add_field(name="Cost", value=f"{self.item['price']:,} 🪙", inline=True)
+        embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+        
+        if self.item.get('description'):
+            embed.add_field(name="Description", value=self.item['description'], inline=False)
+        
+        embed.set_author(
+            name=interaction.user.display_name,
+            icon_url=interaction.user.display_avatar.url
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+        
+        await log_action(
+            "PURCHASE",
+            "💳 Item Purchased",
+            f"**{interaction.user.mention}** bought **{self.item['name']}**",
+            color=0x00ff00,
+            user=interaction.user,
+            fields=[
+                {"name": "Item", "value": self.item['name'], "inline": True},
+                {"name": "Price", "value": f"{self.item['price']:,} 🪙", "inline": True},
+                {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
+            ],
+            channel_id=PURCHASE_LOG_CHANNEL_ID
+        )
+    
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+    async def cancel_purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your purchase!", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="❌ Purchase Cancelled",
+            description="Your purchase has been cancelled.",
+            color=0xff4444
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
 
 class ShopView(discord.ui.View):
     def __init__(self, items, user_balance):
@@ -325,10 +698,10 @@ class ShopView(discord.ui.View):
     
     def create_buy_callback(self, item_index):
         async def buy_callback(interaction):
-            await self.buy_item(interaction, item_index)
+            await self.show_purchase_confirmation(interaction, item_index)
         return buy_callback
     
-    async def buy_item(self, interaction, item_index):
+    async def show_purchase_confirmation(self, interaction, item_index):
         if item_index >= len(self.items):
             await interaction.response.send_message("❌ Invalid item!", ephemeral=True)
             return
@@ -343,41 +716,23 @@ class ShopView(discord.ui.View):
             )
             return
         
-        new_balance = update_user_balance(interaction.user.id, -item['price'])
-        add_purchase_history(interaction.user.id, item['name'], item['price'])
-        save_cache()
-        
         embed = discord.Embed(
-            title="✅ Purchase Successful!",
-            color=0x00ff00,
+            title="🛒 Purchase Confirmation",
+            color=0xFFD700,
             timestamp=datetime.now()
         )
         embed.add_field(name="Item", value=item['name'], inline=True)
         embed.add_field(name="Cost", value=f"{item['price']:,} 🪙", inline=True)
-        embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+        embed.add_field(name="Your Balance", value=f"{user_balance:,} 🪙", inline=True)
+        embed.add_field(name="Balance After", value=f"{user_balance - item['price']:,} 🪙", inline=True)
         
         if item.get('description'):
             embed.add_field(name="Description", value=item['description'], inline=False)
         
-        embed.set_author(
-            name=interaction.user.display_name,
-            icon_url=interaction.user.display_avatar.url
-        )
+        embed.set_footer(text="Are you sure you want to buy this item?")
         
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        await log_action(
-            "PURCHASE",
-            "💳 Item Purchased",
-            f"**{interaction.user.mention}** bought **{item['name']}**",
-            color=0x00ff00,
-            user=interaction.user,
-            fields=[
-                {"name": "Item", "value": item['name'], "inline": True},
-                {"name": "Price", "value": f"{item['price']:,} 🪙", "inline": True},
-                {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
-            ]
-        )
+        view = PurchaseConfirmationView(item, interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 @bot.tree.command(name="shop", description="Browse and buy items from the token shop")
 async def shop(interaction: discord.Interaction):
@@ -395,516 +750,3 @@ async def shop(interaction: discord.Interaction):
         value=f"**{user_balance:,}** 🪙",
         inline=False
     )
-    
-    if not shop_items:
-        embed.description = "🚫 No items available right now!"
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    items_text = ""
-    for i, item in enumerate(shop_items[:10]):
-        affordable = "✅" if user_balance >= item['price'] else "❌"
-        items_text += f"{affordable} **{item['name']}** - {item['price']:,} 🪙\n"
-        if item.get('description'):
-            items_text += f"    *{item['description'][:50]}{'...' if len(item['description']) > 50 else ''}*\n"
-        items_text += "\n"
-    
-    embed.add_field(
-        name="Available Items",
-        value=items_text,
-        inline=False
-    )
-    
-    embed.set_footer(text="Click the buttons below to purchase items!")
-    
-    view = ShopView(shop_items, user_balance)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-@bot.tree.command(name="buy", description="Buy an item by name and quantity")
-async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 1):
-    if quantity <= 0:
-        await interaction.response.send_message("❌ Quantity must be at least 1!", ephemeral=True)
-        return
-    
-    shop_items = get_shop_items()
-    item = None
-    
-    for shop_item in shop_items:
-        if shop_item['name'].lower() == item_name.lower():
-            item = shop_item
-            break
-    
-    if not item:
-        similar_items = [i['name'] for i in shop_items if item_name.lower() in i['name'].lower()]
-        error_msg = f"❌ Item **{item_name}** not found!"
-        if similar_items:
-            error_msg += f"\n\nDid you mean: {', '.join(similar_items[:3])}"
-        await interaction.response.send_message(error_msg, ephemeral=True)
-        return
-    
-    user_balance = get_user_balance(interaction.user.id)
-    total_cost = item['price'] * quantity
-    
-    if user_balance < total_cost:
-        await interaction.response.send_message(
-            f"❌ Insufficient funds!\n"
-            f"**Cost:** {total_cost:,} 🪙 ({item['price']:,} × {quantity})\n"
-            f"**Your Balance:** {user_balance:,} 🪙\n"
-            f"**Need:** {total_cost - user_balance:,} more tokens",
-            ephemeral=True
-        )
-        return
-    
-    new_balance = update_user_balance(interaction.user.id, -total_cost)
-    add_purchase_history(interaction.user.id, item['name'], item['price'], quantity)
-    save_cache()
-    
-    embed = discord.Embed(
-        title="✅ Purchase Successful!",
-        color=0x00ff00,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="Item", value=item['name'], inline=True)
-    embed.add_field(name="Quantity", value=str(quantity), inline=True)
-    embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
-    
-    if item.get('description'):
-        embed.add_field(name="Description", value=item['description'], inline=False)
-    
-    embed.set_author(
-        name=interaction.user.display_name,
-        icon_url=interaction.user.display_avatar.url
-    )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    await log_action(
-        "PURCHASE",
-        "💳 Item Purchased",
-        f"**{interaction.user.mention}** bought **{quantity}x {item['name']}**",
-        color=0x00ff00,
-        user=interaction.user,
-        fields=[
-            {"name": "Item", "value": item['name'], "inline": True},
-            {"name": "Quantity", "value": str(quantity), "inline": True},
-            {"name": "Total Cost", "value": f"{total_cost:,} 🪙", "inline": True},
-            {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
-        ]
-    )
-
-@bot.tree.command(name="addtoken", description="Add tokens to a user (Admin only)")
-async def addtoken(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
-        return
-    
-    old_balance = get_user_balance(user.id)
-    new_balance = update_user_balance(user.id, amount)
-    save_cache()
-    
-    embed = discord.Embed(
-        title="✅ Tokens Added",
-        color=0x00ff00,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="User", value=user.mention, inline=True)
-    embed.add_field(name="Amount Added", value=f"{amount:,} 🪙", inline=True)
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    await log_action(
-        "ADMIN_ADD_TOKENS",
-        "➕ Tokens Added",
-        f"**{interaction.user.mention}** added tokens to **{user.mention}**",
-        color=0x00ff00,
-        user=user,
-        fields=[
-            {"name": "Admin", "value": interaction.user.mention, "inline": True},
-            {"name": "Amount Added", "value": f"{amount:,} 🪙", "inline": True},
-            {"name": "Old Balance", "value": f"{old_balance:,} 🪙", "inline": True},
-            {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
-        ]
-    )
-
-@bot.tree.command(name="removetoken", description="Remove tokens from a user (Admin only)")
-async def removetoken(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
-        return
-    
-    current_balance = get_user_balance(user.id)
-    if current_balance < amount:
-        await interaction.response.send_message(f"❌ User only has {current_balance:,} tokens! Cannot remove {amount:,}.", ephemeral=True)
-        return
-    
-    new_balance = update_user_balance(user.id, -amount)
-    save_cache()
-    
-    embed = discord.Embed(
-        title="✅ Tokens Removed",
-        color=0xff6600,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="User", value=user.mention, inline=True)
-    embed.add_field(name="Amount Removed", value=f"{amount:,} 🪙", inline=True)
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    await log_action(
-        "ADMIN_REMOVE_TOKENS",
-        "➖ Tokens Removed",
-        f"**{interaction.user.mention}** removed tokens from **{user.mention}**",
-        color=0xff6600,
-        user=user,
-        fields=[
-            {"name": "Admin", "value": interaction.user.mention, "inline": True},
-            {"name": "Amount Removed", "value": f"{amount:,} 🪙", "inline": True},
-            {"name": "Old Balance", "value": f"{current_balance:,} 🪙", "inline": True},
-            {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
-        ]
-    )
-
-class ShopManagementView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=300)
-    
-    @discord.ui.button(label="➕ Add Item", style=discord.ButtonStyle.green)
-    async def add_item(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ You don't have permission to use this!", ephemeral=True)
-            return
-        
-        await interaction.response.send_modal(AddItemModal())
-    
-    @discord.ui.button(label="✏️ Update Item", style=discord.ButtonStyle.blurple)
-    async def update_item(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ You don't have permission to use this!", ephemeral=True)
-            return
-        
-        shop_items = get_shop_items()
-        if not shop_items:
-            await interaction.response.send_message("❌ No items in shop to update!", ephemeral=True)
-            return
-        
-        await interaction.response.send_modal(UpdateItemModal(shop_items))
-    
-    @discord.ui.button(label="🗑️ Delete Item", style=discord.ButtonStyle.red)
-    async def delete_item(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ You don't have permission to use this!", ephemeral=True)
-            return
-        
-        shop_items = get_shop_items()
-        if not shop_items:
-            await interaction.response.send_message("❌ No items in shop to delete!", ephemeral=True)
-            return
-        
-        await interaction.response.send_modal(DeleteItemModal(shop_items))
-
-class AddItemModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="Add Shop Item")
-    
-    name = discord.ui.TextInput(label="Item Name", placeholder="Enter item name...")
-    price = discord.ui.TextInput(label="Price (tokens)", placeholder="Enter price in tokens...")
-    description = discord.ui.TextInput(
-        label="Description (optional)", 
-        placeholder="Enter item description...", 
-        required=False,
-        style=discord.TextStyle.long
-    )
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            price_value = int(self.price.value)
-            if price_value <= 0:
-                await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
-                return
-        except ValueError:
-            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
-            return
-        
-        shop_items = get_shop_items()
-        
-        # Check if item with same name already exists
-        for item in shop_items:
-            if item['name'].lower() == self.name.value.lower():
-                await interaction.response.send_message("❌ An item with this name already exists!", ephemeral=True)
-                return
-        
-        new_item = {
-            'name': self.name.value,
-            'price': price_value,
-            'description': self.description.value if self.description.value else ""
-        }
-        
-        shop_items.append(new_item)
-        save_shop_items(shop_items)
-        save_cache()
-        
-        embed = discord.Embed(
-            title="✅ Item Added Successfully!",
-            color=0x00ff00
-        )
-        embed.add_field(name="Item Name", value=new_item['name'], inline=False)
-        embed.add_field(name="Price", value=f"{new_item['price']:,} 🪙", inline=False)
-        if new_item['description']:
-            embed.add_field(name="Description", value=new_item['description'], inline=False)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        await log_action(
-            "SHOP_ADD_ITEM",
-            "🛍️ Item Added to Shop",
-            f"**{interaction.user.mention}** added item **{new_item['name']}** to shop",
-            color=0x00ff00,
-            user=interaction.user,
-            fields=[
-                {"name": "Item Name", "value": new_item['name'], "inline": True},
-                {"name": "Price", "value": f"{new_item['price']:,} 🪙", "inline": True}
-            ]
-        )
-
-class UpdateItemModal(discord.ui.Modal):
-    def __init__(self, shop_items):
-        super().__init__(title="Update Shop Item")
-        self.shop_items = shop_items
-        
-        # Create a list of items for the user to see
-        items_list = "\n".join([f"{i+1}. {item['name']}" for i, item in enumerate(shop_items)])
-        self.item_number.placeholder = f"Available items:\n{items_list[:100]}..."
-    
-    item_number = discord.ui.TextInput(
-        label="Item Number to Update", 
-        placeholder="Enter the item number (1, 2, 3, etc.)",
-        max_length=3
-    )
-    name = discord.ui.TextInput(label="New Item Name (optional)", placeholder="Leave blank to keep current name", required=False)
-    price = discord.ui.TextInput(label="New Price (optional)", placeholder="Leave blank to keep current price", required=False)
-    description = discord.ui.TextInput(
-        label="New Description (optional)", 
-        placeholder="Leave blank to keep current description", 
-        required=False,
-        style=discord.TextStyle.long
-    )
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            item_idx = int(self.item_number.value) - 1
-            if item_idx < 0 or item_idx >= len(self.shop_items):
-                await interaction.response.send_message(f"❌ Invalid item number! Must be between 1 and {len(self.shop_items)}", ephemeral=True)
-                return
-        except ValueError:
-            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
-            return
-        
-        old_item = self.shop_items[item_idx].copy()
-        updated_item = self.shop_items[item_idx]
-        
-        # Update name if provided
-        if self.name.value.strip():
-            # Check if new name conflicts with existing items
-            for i, item in enumerate(self.shop_items):
-                if i != item_idx and item['name'].lower() == self.name.value.lower():
-                    await interaction.response.send_message("❌ An item with this name already exists!", ephemeral=True)
-                    return
-            updated_item['name'] = self.name.value.strip()
-        
-        # Update price if provided
-        if self.price.value.strip():
-            try:
-                new_price = int(self.price.value)
-                if new_price <= 0:
-                    await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
-                    return
-                updated_item['price'] = new_price
-            except ValueError:
-                await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
-                return
-        
-        # Update description if provided
-        if self.description.value.strip():
-            updated_item['description'] = self.description.value.strip()
-        
-        save_shop_items(self.shop_items)
-        save_cache()
-        
-        embed = discord.Embed(
-            title="✅ Item Updated Successfully!",
-            color=0x0099ff
-        )
-        embed.add_field(name="Item Name", value=f"{old_item['name']} → {updated_item['name']}", inline=False)
-        embed.add_field(name="Price", value=f"{old_item['price']:,} → {updated_item['price']:,} 🪙", inline=False)
-        embed.add_field(name="Description", value=f"{old_item.get('description', 'None')} → {updated_item.get('description', 'None')}", inline=False)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        await log_action(
-            "SHOP_UPDATE_ITEM",
-            "✏️ Shop Item Updated",
-            f"**{interaction.user.mention}** updated shop item **{updated_item['name']}**",
-            color=0x0099ff,
-            user=interaction.user,
-            fields=[
-                {"name": "Item", "value": updated_item['name'], "inline": True},
-                {"name": "New Price", "value": f"{updated_item['price']:,} 🪙", "inline": True}
-            ]
-        )
-
-class DeleteItemModal(discord.ui.Modal):
-    def __init__(self, shop_items):
-        super().__init__(title="Delete Shop Item")
-        self.shop_items = shop_items
-        
-        # Create a list of items for the user to see
-        items_list = "\n".join([f"{i+1}. {item['name']}" for i, item in enumerate(shop_items)])
-        self.item_number.placeholder = f"Available items:\n{items_list[:100]}..."
-    
-    item_number = discord.ui.TextInput(
-        label="Item Number to Delete", 
-        placeholder="Enter the item number (1, 2, 3, etc.)",
-        max_length=3
-    )
-    confirmation = discord.ui.TextInput(
-        label="Type 'DELETE' to confirm",
-        placeholder="This action cannot be undone!",
-        max_length=6
-    )
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        if self.confirmation.value.upper() != "DELETE":
-            await interaction.response.send_message("❌ You must type 'DELETE' to confirm!", ephemeral=True)
-            return
-        
-        try:
-            item_idx = int(self.item_number.value) - 1
-            if item_idx < 0 or item_idx >= len(self.shop_items):
-                await interaction.response.send_message(f"❌ Invalid item number! Must be between 1 and {len(self.shop_items)}", ephemeral=True)
-                return
-        except ValueError:
-            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
-            return
-        
-        deleted_item = self.shop_items.pop(item_idx)
-        save_shop_items(self.shop_items)
-        save_cache()
-        
-        embed = discord.Embed(
-            title="✅ Item Deleted Successfully!",
-            color=0xff4444
-        )
-        embed.add_field(name="Deleted Item", value=deleted_item['name'], inline=True)
-        embed.add_field(name="Price", value=f"{deleted_item['price']:,} 🪙", inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        await log_action(
-            "SHOP_DELETE_ITEM",
-            "🗑️ Shop Item Deleted",
-            f"**{interaction.user.mention}** deleted shop item **{deleted_item['name']}**",
-            color=0xff4444,
-            user=interaction.user,
-            fields=[
-                {"name": "Deleted Item", "value": deleted_item['name'], "inline": True},
-                {"name": "Price", "value": f"{deleted_item['price']:,} 🪙", "inline": True}
-            ]
-        )
-
-@bot.tree.command(name="addshop", description="Comprehensive shop management (Admin only)")
-async def addshop(interaction: discord.Interaction):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    shop_items = get_shop_items()
-    
-    embed = discord.Embed(
-        title="🛍️ Shop Management Panel",
-        color=0xff9900,
-        timestamp=datetime.now()
-    )
-    
-    embed.add_field(
-        name="📊 Shop Statistics",
-        value=f"**Total Items:** {len(shop_items)}\n**Status:** {'Active' if shop_items else 'Empty'}",
-        inline=True
-    )
-    
-    if shop_items:
-        total_value = sum(item['price'] for item in shop_items)
-        cheapest = min(shop_items, key=lambda x: x['price'])
-        most_expensive = max(shop_items, key=lambda x: x['price'])
-        
-        embed.add_field(
-            name="💰 Price Range",
-            value=f"**Cheapest:** {cheapest['price']:,} 🪙\n**Most Expensive:** {most_expensive['price']:,} 🪙\n**Total Value:** {total_value:,} 🪙",
-            inline=True
-        )
-        
-        shop_text = ""
-        for i, item in enumerate(shop_items[:10], 1):
-            shop_text += f"**{i}.** {item['name']} - {item['price']:,} 🪙\n"
-        
-        if len(shop_items) > 10:
-            shop_text += f"*... and {len(shop_items) - 10} more items*"
-        
-        embed.add_field(name="🛒 Current Items", value=shop_text or "No items", inline=False)
-    else:
-        embed.add_field(name="🛒 Current Items", value="*Shop is empty*", inline=False)
-    
-    embed.add_field(
-        name="🔧 Available Actions",
-        value="• **Add Item** - Create new shop items\n• **Update Item** - Modify existing items\n• **Delete Item** - Remove items from shop",
-        inline=False
-    )
-    
-    embed.set_footer(text="Use the buttons below to manage the shop • Changes are logged automatically")
-    
-    view = ShopManagementView()
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-@bot.tree.command(name="adminshop", description="Admin shop management (Admin only)")
-async def adminshop(interaction: discord.Interaction):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    shop_items = get_shop_items()
-    
-    embed = discord.Embed(
-        title="🔧 Shop Management Panel",
-        color=0xff9900,
-        timestamp=datetime.now()
-    )
-    
-    if shop_items:
-        shop_text = ""
-        for i, item in enumerate(shop_items, 1):
-            shop_text += f"**{i}.** {item['name']} - {item['price']:,} 🪙\n"
-        embed.add_field(name="Current Shop Items", value=shop_text, inline=False)
-    else:
-        embed.add_field(name="Current Shop Items", value="No items in shop", inline=False)
-    
-    embed.set_footer(text="Use the buttons below to manage the shop")
-    
-    view = ShopManagementView()
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-if __name__ == "__main__":
-    TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-    if not TOKEN:
-        print("❌ Please set the DISCORD_BOT_TOKEN environment variable!")
-    else:
-        bot.run(TOKEN)
