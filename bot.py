@@ -301,6 +301,169 @@ async def shop(interaction: discord.Interaction):
     if not shop_items:
         embed.description = "🚫 No items available!"
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class ShopManagementView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+    
+    @discord.ui.button(label="➕ Add Item", style=discord.ButtonStyle.green)
+    async def add_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        await interaction.response.send_modal(AddItemModal())
+    
+    @discord.ui.button(label="✏️ Update Item", style=discord.ButtonStyle.blurple)
+    async def update_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if not shop_items:
+            await interaction.response.send_message("❌ No items to update!", ephemeral=True)
+            return
+        await interaction.response.send_modal(UpdateItemModal())
+    
+    @discord.ui.button(label="🗑️ Delete Item", style=discord.ButtonStyle.red)
+    async def delete_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if not shop_items:
+            await interaction.response.send_message("❌ No items to delete!", ephemeral=True)
+            return
+        await interaction.response.send_modal(DeleteItemModal())
+
+class AddItemModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Add Shop Item")
+    
+    name = discord.ui.TextInput(label="Item Name", placeholder="Enter item name...")
+    price = discord.ui.TextInput(label="Price (tokens)", placeholder="Enter price...")
+    description = discord.ui.TextInput(label="Description (optional)", placeholder="Enter description...", required=False, style=discord.TextStyle.long)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            price_value = int(self.price.value)
+            if price_value <= 0:
+                await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        new_item = {
+            'name': self.name.value,
+            'price': price_value,
+            'description': self.description.value if self.description.value else ""
+        }
+        
+        shop_items.append(new_item)
+        save_shop_items(shop_items)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Item Added!", color=0x00ff00)
+        embed.add_field(name="Item Name", value=new_item['name'], inline=False)
+        embed.add_field(name="Price", value=f"{new_item['price']:,} 🪙", inline=False)
+        if new_item['description']:
+            embed.add_field(name="Description", value=new_item['description'], inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class UpdateItemModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Update Shop Item")
+    
+    item_number = discord.ui.TextInput(label="Item Number", placeholder="Enter item number (1, 2, 3...)...")
+    name = discord.ui.TextInput(label="New Name", placeholder="Enter new name...")
+    price = discord.ui.TextInput(label="New Price", placeholder="Enter new price...")
+    description = discord.ui.TextInput(label="New Description", placeholder="Enter new description...", required=False, style=discord.TextStyle.long)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            item_index = int(self.item_number.value) - 1
+            price_value = int(self.price.value)
+            if price_value <= 0:
+                await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter valid numbers!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if item_index < 0 or item_index >= len(shop_items):
+            await interaction.response.send_message("❌ Invalid item number!", ephemeral=True)
+            return
+        
+        old_item = shop_items[item_index].copy()
+        shop_items[item_index] = {
+            'name': self.name.value,
+            'price': price_value,
+            'description': self.description.value if self.description.value else ""
+        }
+        
+        save_shop_items(shop_items)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Item Updated!", color=0x00ff00)
+        embed.add_field(name="Old", value=f"{old_item['name']} - {old_item['price']:,} 🪙", inline=False)
+        embed.add_field(name="New", value=f"{shop_items[item_index]['name']} - {shop_items[item_index]['price']:,} 🪙", inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class DeleteItemModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Delete Shop Item")
+    
+    item_number = discord.ui.TextInput(label="Item Number to Delete", placeholder="Enter item number (1, 2, 3...)...")
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            item_index = int(self.item_number.value) - 1
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if item_index < 0 or item_index >= len(shop_items):
+            await interaction.response.send_message("❌ Invalid item number!", ephemeral=True)
+            return
+        
+        deleted_item = shop_items.pop(item_index)
+        save_shop_items(shop_items)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Item Deleted!", color=0xff0000)
+        embed.add_field(name="Deleted Item", value=f"{deleted_item['name']} - {deleted_item['price']:,} 🪙", inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="adminshop", description="Admin shop management (Admin only)")
+async def adminshop(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    shop_items = get_shop_items()
+    
+    embed = discord.Embed(title="🔧 Shop Management Panel", color=0xff9900, timestamp=datetime.now())
+    
+    if shop_items:
+        shop_text = ""
+        for i, item in enumerate(shop_items, 1):
+            shop_text += f"**{i}.** {item['name']} - {item['price']:,} 🪙\n"
+        embed.add_field(name="Current Shop Items", value=shop_text, inline=False)
+    else:
+        embed.add_field(name="Current Shop Items", value="No items in shop", inline=False)
+    
+    embed.set_footer(text="Use the buttons below to manage the shop")
+    
+    view = ShopManagementView()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         return
     
     items_text = ""
