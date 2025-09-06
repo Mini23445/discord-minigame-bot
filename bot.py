@@ -5,8 +5,7 @@ import os
 import random
 import asyncio
 from datetime import datetime, timedelta
-import signal
-import sys
+import atexit
 
 # Bot configuration
 intents = discord.Intents.default()
@@ -23,6 +22,7 @@ PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
 # File paths for data storage
 USER_DATA_FILE = 'user_data.json'
 SHOP_DATA_FILE = 'shop_data.json'
+COOLDOWNS_FILE = 'cooldowns.json'
 
 # Data cache to prevent frequent file I/O
 user_data_cache = {}
@@ -97,7 +97,8 @@ def load_data(filename, default_data=None):
                 return json.load(f)
         else:
             return default_data
-    except:
+    except Exception as e:
+        print(f"Error loading {filename}: {e}")
         return default_data
 
 def save_data(filename, data):
@@ -105,54 +106,53 @@ def save_data(filename, data):
     try:
         with open(filename, 'w') as f:
             json.dump(data, f, indent=4)
+        return True
     except Exception as e:
         print(f"Error saving {filename}: {e}")
+        return False
 
 def init_cache():
     """Initialize data cache"""
     global user_data_cache, shop_data_cache, daily_cooldowns, work_cooldowns, crime_cooldowns
+    
+    print("Loading data files...")
     user_data_cache = load_data(USER_DATA_FILE, {})
     shop_data_cache = load_data(SHOP_DATA_FILE, [])
     
     # Load cooldowns
-    cooldown_data = load_data('cooldowns.json', {})
+    cooldown_data = load_data(COOLDOWNS_FILE, {})
     daily_cooldowns = cooldown_data.get('daily', {})
     work_cooldowns = cooldown_data.get('work', {})
     crime_cooldowns = cooldown_data.get('crime', {})
+    
+    print(f"Loaded {len(user_data_cache)} users, {len(shop_data_cache)} shop items")
 
 def save_cache():
     """Save cache to files"""
     global cache_dirty
-    if cache_dirty:
-        save_data(USER_DATA_FILE, user_data_cache)
-        save_data(SHOP_DATA_FILE, shop_data_cache)
-        
-        # Save cooldowns
-        cooldown_data = {
-            'daily': daily_cooldowns,
-            'work': work_cooldowns,
-            'crime': crime_cooldowns
-        }
-        save_data('cooldowns.json', cooldown_data)
-        cache_dirty = False
+    try:
+        if cache_dirty:
+            print("Saving data...")
+            save_data(USER_DATA_FILE, user_data_cache)
+            save_data(SHOP_DATA_FILE, shop_data_cache)
+            
+            # Save cooldowns
+            cooldown_data = {
+                'daily': daily_cooldowns,
+                'work': work_cooldowns,
+                'crime': crime_cooldowns
+            }
+            save_data(COOLDOWNS_FILE, cooldown_data)
+            cache_dirty = False
+            print("Data saved successfully!")
+    except Exception as e:
+        print(f"Error saving cache: {e}")
 
-def cleanup_and_exit():
-    """Save all data before exit"""
-    print("🔄 Saving data before shutdown...")
-    save_cache()
-    print("✅ Data saved successfully!")
-
-# Register cleanup handlers
-def signal_handler(sig, frame):
-    cleanup_and_exit()
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+# Register cleanup function
+atexit.register(save_cache)
 
 def get_user_balance(user_id):
     """Get user's token balance from cache"""
-    global user_data_cache
     return user_data_cache.get(str(user_id), {}).get('balance', 0)
 
 def update_user_balance(user_id, amount):
@@ -196,7 +196,6 @@ def add_purchase_history(user_id, item_name, price, quantity=1):
 
 def get_shop_items():
     """Get all shop items from cache"""
-    global shop_data_cache
     return shop_data_cache
 
 def save_shop_items(items):
@@ -226,70 +225,49 @@ def get_user_rank(balance):
     else:
         return "🔵 Starter"
 
-def can_use_daily(user_id):
-    """Check if user can use daily command"""
+def can_use_command(user_id, cooldown_dict, hours):
+    """Check if user can use a command with cooldown"""
     user_id_str = str(user_id)
-    if user_id_str not in daily_cooldowns:
+    if user_id_str not in cooldown_dict:
         return True, None
     
-    last_used = datetime.fromisoformat(daily_cooldowns[user_id_str])
-    next_use = last_used + timedelta(hours=24)
-    
-    if datetime.now() >= next_use:
+    try:
+        last_used = datetime.fromisoformat(cooldown_dict[user_id_str])
+        next_use = last_used + timedelta(hours=hours)
+        
+        if datetime.now() >= next_use:
+            return True, None
+        else:
+            return False, next_use
+    except:
         return True, None
-    else:
-        return False, next_use
-
-def can_use_work(user_id):
-    """Check if user can use work command"""
-    user_id_str = str(user_id)
-    if user_id_str not in work_cooldowns:
-        return True, None
-    
-    last_used = datetime.fromisoformat(work_cooldowns[user_id_str])
-    next_use = last_used + timedelta(hours=3)
-    
-    if datetime.now() >= next_use:
-        return True, None
-    else:
-        return False, next_use
-
-def can_use_crime(user_id):
-    """Check if user can use crime command"""
-    user_id_str = str(user_id)
-    if user_id_str not in crime_cooldowns:
-        return True, None
-    
-    last_used = datetime.fromisoformat(crime_cooldowns[user_id_str])
-    next_use = last_used + timedelta(hours=1)  # 1 hour cooldown for crime
-    
-    if datetime.now() >= next_use:
-        return True, None
-    else:
-        return False, next_use
 
 def format_time_remaining(next_use):
     """Format remaining time until next use"""
-    remaining = next_use - datetime.now()
-    hours, remainder = divmod(int(remaining.total_seconds()), 3600)
-    minutes, _ = divmod(remainder, 60)
-    
-    if hours > 0:
-        return f"{hours}h {minutes}m"
-    else:
-        return f"{minutes}m"
+    try:
+        remaining = next_use - datetime.now()
+        hours, remainder = divmod(int(remaining.total_seconds()), 3600)
+        minutes, _ = divmod(remainder, 60)
+        
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        else:
+            return f"{minutes}m"
+    except:
+        return "unknown"
 
 # Auto-save task
 async def auto_save_task():
-    """Automatically save cache every 30 seconds"""
+    """Automatically save cache every 60 seconds"""
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
         save_cache()
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has landed! 🚀')
     init_cache()
+    
     # Start auto-save task
     bot.loop.create_task(auto_save_task())
     
@@ -313,7 +291,7 @@ async def on_message(message):
     
     if message.guild:
         tokens_earned = random.randint(1, 5)
-        new_balance = update_user_balance(message.author.id, tokens_earned)
+        update_user_balance(message.author.id, tokens_earned)
         
     await bot.process_commands(message)
 
@@ -352,12 +330,12 @@ async def balance(interaction: discord.Interaction):
         inline=True
     )
     embed.add_field(
-        name="‎",  # Invisible character for spacing
+        name="‎",
         value="‎",
         inline=True
     )
     embed.add_field(
-        name="‎",  # Invisible character for spacing
+        name="‎",
         value="‎",
         inline=True
     )
@@ -430,7 +408,7 @@ async def adminbalance(interaction: discord.Interaction, user: discord.Member):
 
 @bot.tree.command(name="daily", description="Claim your daily tokens (24h cooldown)")
 async def daily(interaction: discord.Interaction):
-    can_use, next_use = can_use_daily(interaction.user.id)
+    can_use, next_use = can_use_command(interaction.user.id, daily_cooldowns, 24)
     
     if not can_use:
         time_remaining = format_time_remaining(next_use)
@@ -440,11 +418,9 @@ async def daily(interaction: discord.Interaction):
         )
         return
     
-    # Give random tokens between 1-50
     tokens_earned = random.randint(1, 50)
     new_balance = update_user_balance(interaction.user.id, tokens_earned)
     
-    # Update cooldown
     daily_cooldowns[str(interaction.user.id)] = datetime.now().isoformat()
     save_cache()
     
@@ -466,7 +442,7 @@ async def daily(interaction: discord.Interaction):
 
 @bot.tree.command(name="work", description="Work a job to earn tokens (3h cooldown)")
 async def work(interaction: discord.Interaction):
-    can_use, next_use = can_use_work(interaction.user.id)
+    can_use, next_use = can_use_command(interaction.user.id, work_cooldowns, 3)
     
     if not can_use:
         time_remaining = format_time_remaining(next_use)
@@ -476,12 +452,10 @@ async def work(interaction: discord.Interaction):
         )
         return
     
-    # Give random tokens between 1-100
     tokens_earned = random.randint(1, 100)
     job = random.choice(WORK_JOBS)
     new_balance = update_user_balance(interaction.user.id, tokens_earned)
     
-    # Update cooldown
     work_cooldowns[str(interaction.user.id)] = datetime.now().isoformat()
     save_cache()
     
@@ -504,7 +478,7 @@ async def work(interaction: discord.Interaction):
 
 @bot.tree.command(name="crime", description="Commit a crime for tokens (1h cooldown, risky!)")
 async def crime(interaction: discord.Interaction):
-    can_use, next_use = can_use_crime(interaction.user.id)
+    can_use, next_use = can_use_command(interaction.user.id, crime_cooldowns, 1)
     
     if not can_use:
         time_remaining = format_time_remaining(next_use)
@@ -514,7 +488,6 @@ async def crime(interaction: discord.Interaction):
         )
         return
     
-    # Random success/failure
     success = random.choice([True, False])
     crime_activity = random.choice(CRIME_ACTIVITIES)
     
@@ -534,7 +507,6 @@ async def crime(interaction: discord.Interaction):
         tokens_lost = random.randint(3, 100)
         current_balance = get_user_balance(interaction.user.id)
         
-        # Don't let balance go negative
         tokens_lost = min(tokens_lost, current_balance)
         new_balance = update_user_balance(interaction.user.id, -tokens_lost)
         
@@ -554,7 +526,6 @@ async def crime(interaction: discord.Interaction):
         icon_url=interaction.user.display_avatar.url
     )
     
-    # Update cooldown
     crime_cooldowns[str(interaction.user.id)] = datetime.now().isoformat()
     save_cache()
     
@@ -583,16 +554,13 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
         )
         return
     
-    # Transfer tokens
     giver_new_balance = update_user_balance(interaction.user.id, -amount)
     receiver_new_balance = update_user_balance(user.id, amount)
     save_cache()
     
-    # Send public message with emojis (max 3 emojis)
     gift_message = f"🎁 {interaction.user.mention} gifted **{amount:,} tokens** 🪙 to {user.mention}! 🎉"
     await interaction.response.send_message(gift_message)
     
-    # Log the gift action
     await log_action(
         "GIFT",
         "🎁 Token Gift",
@@ -750,3 +718,190 @@ async def shop(interaction: discord.Interaction):
         value=f"**{user_balance:,}** 🪙",
         inline=False
     )
+    
+    if not shop_items:
+        embed.description = "🚫 No items available right now!"
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    items_text = ""
+    for i, item in enumerate(shop_items[:10]):
+        affordable = "✅" if user_balance >= item['price'] else "❌"
+        items_text += f"{affordable} **{item['name']}** - {item['price']:,} 🪙\n"
+        if item.get('description'):
+            items_text += f"    *{item['description'][:50]}{'...' if len(item['description']) > 50 else ''}*\n"
+        items_text += "\n"
+    
+    embed.add_field(
+        name="Available Items",
+        value=items_text,
+        inline=False
+    )
+    
+    embed.set_footer(text="Click the buttons below to purchase items!")
+    
+    view = ShopView(shop_items, user_balance)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.tree.command(name="addtoken", description="Add tokens to a user (Admin only)")
+async def addtoken(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    old_balance = get_user_balance(user.id)
+    new_balance = update_user_balance(user.id, amount)
+    save_cache()
+    
+    embed = discord.Embed(
+        title="✅ Tokens Added",
+        color=0x00ff00,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="User", value=user.mention, inline=True)
+    embed.add_field(name="Amount Added", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="removetoken", description="Remove tokens from a user (Admin only)")
+async def removetoken(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    current_balance = get_user_balance(user.id)
+    if current_balance < amount:
+        await interaction.response.send_message(f"❌ User only has {current_balance:,} tokens! Cannot remove {amount:,}.", ephemeral=True)
+        return
+    
+    new_balance = update_user_balance(user.id, -amount)
+    save_cache()
+    
+    embed = discord.Embed(
+        title="✅ Tokens Removed",
+        color=0xff6600,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="User", value=user.mention, inline=True)
+    embed.add_field(name="Amount Removed", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class AddItemModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Add Shop Item")
+    
+    name = discord.ui.TextInput(label="Item Name", placeholder="Enter item name...")
+    price = discord.ui.TextInput(label="Price (tokens)", placeholder="Enter price in tokens...")
+    description = discord.ui.TextInput(
+        label="Description (optional)", 
+        placeholder="Enter item description...", 
+        required=False,
+        style=discord.TextStyle.long
+    )
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            price_value = int(self.price.value)
+            if price_value <= 0:
+                await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        
+        for item in shop_items:
+            if item['name'].lower() == self.name.value.lower():
+                await interaction.response.send_message("❌ An item with this name already exists!", ephemeral=True)
+                return
+        
+        new_item = {
+            'name': self.name.value,
+            'price': price_value,
+            'description': self.description.value if self.description.value else ""
+        }
+        
+        shop_items.append(new_item)
+        save_shop_items(shop_items)
+        save_cache()
+        
+        embed = discord.Embed(
+            title="✅ Item Added Successfully!",
+            color=0x00ff00
+        )
+        embed.add_field(name="Item Name", value=new_item['name'], inline=False)
+        embed.add_field(name="Price", value=f"{new_item['price']:,} 🪙", inline=False)
+        if new_item['description']:
+            embed.add_field(name="Description", value=new_item['description'], inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class ShopManagementView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+    
+    @discord.ui.button(label="➕ Add Item", style=discord.ButtonStyle.green)
+    async def add_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission to use this!", ephemeral=True)
+            return
+        
+        await interaction.response.send_modal(AddItemModal())
+
+@bot.tree.command(name="addshop", description="Add items to shop (Admin only)")
+async def addshop(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    shop_items = get_shop_items()
+    
+    embed = discord.Embed(
+        title="🛍️ Shop Management",
+        color=0xff9900,
+        timestamp=datetime.now()
+    )
+    
+    embed.add_field(
+        name="📊 Shop Stats",
+        value=f"**Items:** {len(shop_items)}\n**Status:** {'Active' if shop_items else 'Empty'}",
+        inline=True
+    )
+    
+    if shop_items:
+        shop_text = ""
+        for i, item in enumerate(shop_items[:5], 1):
+            shop_text += f"**{i}.** {item['name']} - {item['price']:,} 🪙\n"
+        
+        if len(shop_items) > 5:
+            shop_text += f"*... and {len(shop_items) - 5} more*"
+        
+        embed.add_field(name="🛒 Items", value=shop_text, inline=False)
+    else:
+        embed.add_field(name="🛒 Items", value="*No items*", inline=False)
+    
+    view = ShopManagementView()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+if __name__ == "__main__":
+    TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+    if not TOKEN:
+        print("❌ Please set the DISCORD_BOT_TOKEN environment variable!")
+    else:
+        try:
+            bot.run(TOKEN)
+        except Exception as e:
+            print(f"❌ Bot error: {e}")
+            save_cache()  # Save data on error
