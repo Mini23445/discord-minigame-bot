@@ -567,36 +567,6 @@ class ConfirmResetView(discord.ui.View):
     @discord.ui.button(label="✅ YES, RESET ALL DATA", style=discord.ButtonStyle.red)
     async def confirm_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.admin_user:
-            await interaction.response.send_message("❌ Only the admin who started this can confirm!", ephemeral=True)
-            return
-        
-        global user_data_cache, cache_dirty
-        user_count = len(user_data_cache)
-        user_data_cache = {}
-        cache_dirty = True
-        save_cache()
-        
-        embed = discord.Embed(
-            title="✅ Data Reset Complete!",
-            description=f"🗑️ Reset data for **{user_count}** users\n💫 All balances are now 0",
-            color=0x00ff00,
-            timestamp=datetime.now()
-        )
-        
-        await interaction.response.edit_message(embed=embed, view=None)
-        
-        await log_action(
-            "ADMIN_RESET_DATA",
-            "🗑️ Data Reset",
-            f"**{self.admin_user.mention}** reset all user data",
-            color=0xff0000,
-            user=self.admin_user,
-            fields=[{"name": "Users Affected", "value": str(user_count), "inline": True}]
-        )
-    
-    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.grey)
-    async def cancel_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user != self.admin_user:
             await interaction.response.send_message("❌ Only the admin who started this can cancel!", ephemeral=True)
             return
         
@@ -808,79 +778,6 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
         ]
     )
 
-@bot.tree.command(name="adminbalance", description="View user balance (Admin only)")
-async def adminbalance(interaction: discord.Interaction, user: discord.Member):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    user_balance = get_user_balance(user.id)
-    user_data = user_data_cache.get(str(user.id), {})
-    total_earned = user_data.get('total_earned', 0)
-    total_spent = user_data.get('total_spent', 0)
-    rank = get_user_rank(user_balance)
-    
-    embed = discord.Embed(title=f"👤 {user.display_name}'s Token Wallet", color=0xff9900, timestamp=datetime.now())
-    embed.add_field(name="Current Balance", value=f"**{user_balance:,}** 🪙", inline=True)
-    embed.add_field(name="Rank", value=rank, inline=True)
-    embed.add_field(name="‎", value="‎", inline=True)
-    embed.add_field(name="Total Earned", value=f"{total_earned:,} 🪙", inline=True)
-    embed.add_field(name="Total Spent", value=f"{total_spent:,} 🪙", inline=True)
-    embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
-    embed.set_footer(text="Admin view of user balance")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="adminshop", description="Admin shop management (Admin only)")
-async def adminshop(interaction: discord.Interaction):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    shop_items = get_shop_items()
-    
-    embed = discord.Embed(title="🔧 Shop Management Panel", color=0xff9900, timestamp=datetime.now())
-    
-    if shop_items:
-        shop_text = ""
-        for i, item in enumerate(shop_items, 1):
-            shop_text += f"**{i}.** {item['name']} - {item['price']:,} 🪙\n"
-        embed.add_field(name="Current Shop Items", value=shop_text, inline=False)
-    else:
-        embed.add_field(name="Current Shop Items", value="No items in shop", inline=False)
-    
-    embed.set_footer(text="Use other admin commands to manage items")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="resetdata", description="Reset all user data (Admin only)")
-async def resetdata(interaction: discord.Interaction):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    global user_data_cache, cache_dirty
-    user_count = len(user_data_cache)
-    user_data_cache = {}
-    cache_dirty = True
-    save_cache()
-    
-    embed = discord.Embed(
-        title="✅ Data Reset Complete!",
-        description=f"🗑️ Reset data for **{user_count}** users\n💫 All balances are now 0",
-        color=0x00ff00,
-        timestamp=datetime.now()
-    )
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    await log_action(
-        "ADMIN_RESET_DATA",
-        "🗑️ Data Reset",
-        f"**{interaction.user.mention}** reset all user data",
-        color=0xff0000,
-        user=interaction.user,
-        fields=[{"name": "Users Affected", "value": str(user_count), "inline": True}]
-    )
-
 @bot.event
 async def on_disconnect():
     print("Bot disconnected, saving data...")
@@ -898,4 +795,34 @@ if __name__ == "__main__":
         print("❌ Please set the DISCORD_BOT_TOKEN environment variable!")
     else:
         print("🚀 Starting bot with 9 commands...")
-        bot.run(TOKEN)
+        bot.run(TOKEN) Only the admin who started this can confirm!", ephemeral=True)
+            return
+        
+        global user_data_cache, cache_dirty
+        user_count = len(user_data_cache)
+        user_data_cache = {}
+        cache_dirty = True
+        save_cache()
+        
+        embed = discord.Embed(
+            title="✅ Data Reset Complete!",
+            description=f"🗑️ Reset data for **{user_count}** users\n💫 All balances are now 0",
+            color=0x00ff00,
+            timestamp=datetime.now()
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+        
+        await log_action(
+            "ADMIN_RESET_DATA",
+            "🗑️ Data Reset",
+            f"**{self.admin_user.mention}** reset all user data",
+            color=0xff0000,
+            user=self.admin_user,
+            fields=[{"name": "Users Affected", "value": str(user_count), "inline": True}]
+        )
+    
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.grey)
+    async def cancel_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.admin_user:
+            await interaction.response.send_message("❌
