@@ -228,11 +228,11 @@ async def addtokens(interaction: discord.Interaction, user: discord.Member, amou
 @bot.tree.command(name="additem", description="Add an item to the shop (Admin only)")
 async def additem(interaction: discord.Interaction, name: str, price: int, description: str = ""):
     if not is_admin(interaction.user):
-        await interaction.response.send_message("You don't have permission!", ephemeral=True)
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
         return
     
     if price <= 0:
-        await interaction.response.send_message("Price must be greater than 0!", ephemeral=True)
+        await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
         return
     
     new_item = {
@@ -244,18 +244,23 @@ async def additem(interaction: discord.Interaction, name: str, price: int, descr
     shop_data_cache.append(new_item)
     save_data(SHOP_DATA_FILE, shop_data_cache)
     
-    embed = discord.Embed(title="Item Added!", color=0x00ff00)
-    embed.add_field(name="Name", value=name, inline=True)
-    embed.add_field(name="Price", value=f"{price:,} tokens", inline=True)
+    embed = discord.Embed(title="✅ Item Added to Shop!", color=0x00ff00, timestamp=datetime.now())
+    embed.add_field(name="🏷️ Name", value=name, inline=True)
+    embed.add_field(name="💰 Price", value=f"{price:,} 🪙", inline=True)
+    embed.add_field(name="🆔 Item #", value=f"#{len(shop_data_cache)}", inline=True)
+    
     if description:
-        embed.add_field(name="Description", value=description, inline=False)
+        embed.add_field(name="📝 Description", value=description, inline=False)
+    
+    embed.set_author(name="Shop Management", icon_url=interaction.user.display_avatar.url)
+    embed.set_footer(text=f"Added by {interaction.user.display_name}")
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="resetdata", description="Reset all user data (Admin only)")
 async def resetdata(interaction: discord.Interaction):
     if not is_admin(interaction.user):
-        await interaction.response.send_message("You don't have permission!", ephemeral=True)
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
         return
     
     global user_data_cache, cache_dirty
@@ -264,7 +269,13 @@ async def resetdata(interaction: discord.Interaction):
     cache_dirty = True
     save_cache()
     
-    embed = discord.Embed(title="Data Reset Complete!", description=f"Reset data for {user_count} users", color=0xff0000)
+    embed = discord.Embed(title="🗑️ Data Reset Complete!", color=0xff0000, timestamp=datetime.now())
+    embed.add_field(name="📊 Users Affected", value=f"{user_count} users", inline=True)
+    embed.add_field(name="💰 Balances Reset", value="All set to 0 🪙", inline=True)
+    embed.add_field(name="⚠️ Status", value="**Permanent Action**", inline=True)
+    embed.set_author(name="Admin Action", icon_url=interaction.user.display_avatar.url)
+    embed.set_footer(text=f"Reset performed by {interaction.user.display_name}")
+    
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 if __name__ == "__main__":
