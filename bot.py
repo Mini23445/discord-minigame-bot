@@ -736,45 +736,45 @@ async def leaderboard(interaction: discord.Interaction):
 @bot.tree.command(name="gift", description="Gift tokens to another user")
 async def gift(interaction: discord.Interaction, user: discord.Member, amount: int):
     if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        await interaction.response.send_message("Amount must be greater than 0!", ephemeral=True)
         return
     
     if user.id == interaction.user.id:
-        await interaction.response.send_message("❌ You can't gift tokens to yourself!", ephemeral=True)
+        await interaction.response.send_message("You can't gift tokens to yourself!", ephemeral=True)
         return
     
     if user.bot:
-        await interaction.response.send_message("❌ You can't gift tokens to bots!", ephemeral=True)
+        await interaction.response.send_message("You can't gift tokens to bots!", ephemeral=True)
         return
     
     sender_balance = get_user_balance(interaction.user.id)
     if sender_balance < amount:
-        await interaction.response.send_message(f"❌ Insufficient funds! You have {sender_balance:,} 🪙 but need {amount:,} 🪙", ephemeral=True)
+        await interaction.response.send_message(f"Insufficient funds! You have {sender_balance:,} tokens but need {amount:,} tokens", ephemeral=True)
         return
     
     sender_new_balance = update_user_balance(interaction.user.id, -amount)
     receiver_new_balance = update_user_balance(user.id, amount)
     save_cache()
     
-    gift_message = f"🎁 {interaction.user.mention} gifted **{amount:,} Tokens** 🪙 to {user.mention}!"
+    gift_message = f"{interaction.user.mention} gifted {amount:,} Tokens to {user.mention}!"
     await interaction.response.send_message(gift_message)
     
     try:
-        notify_message = f"🎁 **{interaction.user.display_name}** sent you **{amount:,} Tokens** 🪙! Your new balance: **{receiver_new_balance:,}** 🪙"
+        notify_message = f"{interaction.user.display_name} sent you {amount:,} Tokens! Your new balance: {receiver_new_balance:,} tokens"
         await user.send(notify_message)
     except:
         pass
     
     await log_action(
         "GIFT",
-        "🎁 Token Gift",
-        f"**{interaction.user.mention}** gifted tokens to **{user.mention}**",
+        "Token Gift",
+        f"{interaction.user.mention} gifted tokens to {user.mention}",
         color=0x9932cc,
         user=interaction.user,
         fields=[
             {"name": "Sender", "value": interaction.user.mention, "inline": True},
             {"name": "Recipient", "value": user.mention, "inline": True},
-            {"name": "Amount", "value": f"{amount:,} 🪙", "inline": True}
+            {"name": "Amount", "value": f"{amount:,} tokens", "inline": True}
         ]
     )
 
@@ -790,7 +790,7 @@ async def on_command_error(ctx, error):
     print(f"Error: {error}")
 
 if __name__ == "__main__":
-    TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+    TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     if not TOKEN:
         print("Please set the DISCORD_BOT_TOKEN environment variable!")
     else:
