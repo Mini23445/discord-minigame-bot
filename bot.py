@@ -678,6 +678,165 @@ class ShopManageView(discord.ui.View):
         
         await interaction.response.send_modal(DeleteItemModal())
 
+@bot.tree.command(name="resetdata", description="Reset all user data (Admin only)")
+async def resetdata(interaction: discord.Interaction, confirmation_code: str):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+        return
+    
+    if confirmation_code != "BgH7459njrYEy7":
+        await interaction.response.send_message("❌ Invalid confirmation code!", ephemeral=True)
+        return
+    
+    # Ask for final confirmation
+    embed = discord.Embed(
+        title="⚠️ DATA RESET CONFIRMATION",
+        description="**Are you absolutely sure you want to reset ALL user data?**\n\n"
+                   "This will permanently delete:\n"
+                   "• All user balances\n"
+                   "• All earning/spending history\n"
+                   "• All cooldown timers\n"
+                   "• Purchase records\n\n"
+                   "**THIS CANNOT BE UNDONE!**",
+        color=0xff0000
+    )
+    
+    class ResetConfirmView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=30)
+        
+        @discord.ui.button(label="🗑️ YES, RESET ALL DATA", style=discord.ButtonStyle.danger)
+        async def confirm_reset(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+            if button_interaction.user.id != interaction.user.id:
+                await button_interaction.response.send_message("❌ Only the command user can confirm!", ephemeral=True)
+                return
+            
+            # Reset all data
+            global user_data, cooldowns
+            user_data.clear()
+            cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}}
+            save_data()
+            
+            success_embed = discord.Embed(
+                title="✅ Data Reset Complete",
+                description="All user data has been permanently deleted.\n"
+                           "Users will start fresh with 0 tokens.",
+                color=0x00ff00
+            )
+            success_embed.set_footer(text=f"Reset by {interaction.user.display_name}")
+            
+            await button_interaction.response.edit_message(embed=success_embed, view=None)
+        
+        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.secondary)
+        async def cancel_reset(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+            if button_interaction.user.id != interaction.user.id:
+                await button_interaction.response.send_message("❌ Only the command user can cancel!", ephemeral=True)
+                return
+            
+            cancel_embed = discord.Embed(
+                title="❌ Reset Cancelled",
+                description="Data reset has been cancelled. All user data remains intact.",
+                color=0x808080
+            )
+            
+            await button_interaction.response.edit_message(embed=cancel_embed, view=None)
+    
+    view = ResetConfirmView()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+@bot.tree.command(name="leaderboard", description="View the top token holders")
+async def leaderboard(interaction: discord.Interaction, page: int = 1):
+    if not user_data:
+        embed = discord.Embed(
+            title="📊 Token Leaderboard",
+            description="No users have earned tokens yet!",
+            color=0x0099ff
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Sort users by balance
+    sorted_users = []
+    for user_id, data in user_data.items():
+        balance = data.get('balance', 0)
+        if balance > 0:  # Only show users with tokens
+            try:
+                user = bot.get_user(int(user_id))
+                if user:
+                    sorted_users.append({
+                        'user': user,
+                        'balance': balance,
+                        'rank': get_rank(balance)
+                    })
+            except:
+                continue
+    
+    sorted_users.sort(key=lambda x: x['balance'], reverse=True)
+    
+    if not sorted_users:
+        embed = discord.Embed(
+            title="📊 Token Leaderboard",
+            description="No users with tokens found!",
+            color=0x0099ff
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Pagination
+    per_page = 10
+    max_pages = (len(sorted_users) + per_page - 1) // per_page
+    page = max(1, min(page, max_pages))
+    
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    page_users = sorted_users[start_idx:end_idx]
+    
+    embed = discord.Embed(
+        title="📊 Token Leaderboard",
+        color=0xFFD700,
+        timestamp=datetime.now()
+    )
+    
+    leaderboard_text = ""
+    for i, user_data_item in enumerate(page_users, start=start_idx + 1):
+        user = user_data_item['user']
+        balance = user_data_item['balance']
+        rank = user_data_item['rank']
+        
+        # Add medal emojis for top 3
+        if i == 1:
+            medal = "🥇"
+        elif i == 2:
+            medal = "🥈"
+        elif i == 3:
+            medal = "🥉"
+        else:
+            medal = f"**{i}.**"
+        
+        leaderboard_text += f"{medal} **{user.display_name}** - {balance:,} 🪙 {rank}\n"
+    
+    embed.add_field(name="Rankings", value=leaderboard_text, inline=False)
+    
+    # Add user's position if they're not on current page
+    user_position = None
+    for i, user_data_item in enumerate(sorted_users, 1):
+        if user_data_item['user'].id == interaction.user.id:
+            user_position = i
+            break
+    
+    if user_position and (user_position < start_idx + 1 or user_position > end_idx):
+        user_balance = get_user_balance(interaction.user.id)
+        user_rank = get_rank(user_balance)
+        embed.add_field(
+            name="Your Position",
+            value=f"**#{user_position}** - {user_balance:,} 🪙 {user_rank}",
+            inline=False
+        )
+    
+    embed.set_footer(text=f"Page {page}/{max_pages} • {len(sorted_users)} total users")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=False)
+
 @bot.tree.command(name="addshop", description="Manage shop (Admin only)")
 async def addshop(interaction: discord.Interaction):
     if not is_admin(interaction.user):
