@@ -792,9 +792,9 @@ async def on_command_error(ctx, error):
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_BOT_TOKEN')
     if not TOKEN:
-        print("❌ Please set the DISCORD_BOT_TOKEN environment variable!")
+        print("Please set the DISCORD_BOT_TOKEN environment variable!")
     else:
-        print("🚀 Starting bot with 9 commands...")
+        print("Starting bot with 9 commands...")
         bot.run(TOKEN) Only the admin who started this can confirm!", ephemeral=True)
             return
         
