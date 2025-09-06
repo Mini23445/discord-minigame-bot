@@ -215,9 +215,368 @@ async def shop(interaction: discord.Interaction):
         items_text += "\n"
     
     embed.add_field(name="Available Items", value=items_text, inline=False)
-    embed.set_footer(text="Use /buy item_name to purchase!")
+    embed.set_footer(text="Click the buttons below to purchase items!")
     
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    view = ShopView(shop_items, user_balance)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class AdminTokenView(discord.ui.View):
+    def __init__(self, target_user):
+        super().__init__(timeout=300)
+        self.target_user = target_user
+    
+    @discord.ui.button(label="➕ Add Tokens", style=discord.ButtonStyle.green)
+    async def add_tokens(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        await interaction.response.send_modal(AddTokenModal(self.target_user))
+    
+    @discord.ui.button(label="➖ Remove Tokens", style=discord.ButtonStyle.red)
+    async def remove_tokens(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        await interaction.response.send_modal(RemoveTokenModal(self.target_user))
+
+class AddTokenModal(discord.ui.Modal):
+    def __init__(self, target_user):
+        super().__init__(title=f"Add Tokens to {target_user.display_name}")
+        self.target_user = target_user
+    
+    amount = discord.ui.TextInput(label="Amount to Add", placeholder="Enter amount...")
+    reason = discord.ui.TextInput(label="Reason (optional)", placeholder="Reason...", required=False)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            amount_value = int(self.amount.value)
+            if amount_value <= 0:
+                await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Amount must be a valid number!", ephemeral=True)
+            return
+        
+        old_balance = get_user_balance(self.target_user.id)
+        new_balance = update_user_balance(self.target_user.id, amount_value)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Tokens Added!", color=0x00ff00, timestamp=datetime.now())
+        embed.add_field(name="User", value=self.target_user.mention, inline=True)
+        embed.add_field(name="Amount Added", value=f"{amount_value:,} 🪙", inline=True)
+        embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+        if self.reason.value:
+            embed.add_field(name="Reason", value=self.reason.value, inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        await log_action(
+            "ADMIN_ADD_TOKENS",
+            "➕ Tokens Added",
+            f"**{interaction.user.mention}** added tokens to **{self.target_user.mention}**",
+            color=0x00ff00,
+            user=self.target_user,
+            fields=[
+                {"name": "Admin", "value": interaction.user.mention, "inline": True},
+                {"name": "Amount", "value": f"{amount_value:,} 🪙", "inline": True},
+                {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
+            ]
+        )
+
+class RemoveTokenModal(discord.ui.Modal):
+    def __init__(self, target_user):
+        super().__init__(title=f"Remove Tokens from {target_user.display_name}")
+        self.target_user = target_user
+    
+    amount = discord.ui.TextInput(label="Amount to Remove", placeholder="Enter amount...")
+    reason = discord.ui.TextInput(label="Reason (optional)", placeholder="Reason...", required=False)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            amount_value = int(self.amount.value)
+            if amount_value <= 0:
+                await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Amount must be a valid number!", ephemeral=True)
+            return
+        
+        current_balance = get_user_balance(self.target_user.id)
+        if current_balance < amount_value:
+            await interaction.response.send_message(f"❌ User only has {current_balance:,} tokens!", ephemeral=True)
+            return
+        
+        new_balance = update_user_balance(self.target_user.id, -amount_value)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Tokens Removed!", color=0xff6600, timestamp=datetime.now())
+        embed.add_field(name="User", value=self.target_user.mention, inline=True)
+        embed.add_field(name="Amount Removed", value=f"{amount_value:,} 🪙", inline=True)
+        embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+        if self.reason.value:
+            embed.add_field(name="Reason", value=self.reason.value, inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        await log_action(
+            "ADMIN_REMOVE_TOKENS",
+            "➖ Tokens Removed",
+            f"**{interaction.user.mention}** removed tokens from **{self.target_user.mention}**",
+            color=0xff6600,
+            user=self.target_user,
+            fields=[
+                {"name": "Admin", "value": interaction.user.mention, "inline": True},
+                {"name": "Amount", "value": f"{amount_value:,} 🪙", "inline": True},
+                {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
+            ]
+        )
+
+@bot.tree.command(name="adminbalance", description="View and manage user balance (Admin only)")
+async def adminbalance(interaction: discord.Interaction, user: discord.Member):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    user_balance = get_user_balance(user.id)
+    user_data = user_data_cache.get(str(user.id), {})
+    total_earned = user_data.get('total_earned', 0)
+    total_spent = user_data.get('total_spent', 0)
+    rank = get_user_rank(user_balance)
+    
+    embed = discord.Embed(title=f"👤 {user.display_name}'s Token Wallet", color=0xff9900, timestamp=datetime.now())
+    embed.add_field(name="Current Balance", value=f"**{user_balance:,}** 🪙", inline=True)
+    embed.add_field(name="Rank", value=rank, inline=True)
+    embed.add_field(name="‎", value="‎", inline=True)
+    embed.add_field(name="Total Earned", value=f"{total_earned:,} 🪙", inline=True)
+    embed.add_field(name="Total Spent", value=f"{total_spent:,} 🪙", inline=True)
+    embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
+    embed.set_footer(text="Use the buttons below to modify balance")
+    
+    view = AdminTokenView(user)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class ShopManagementView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+    
+    @discord.ui.button(label="➕ Add Item", style=discord.ButtonStyle.green)
+    async def add_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        await interaction.response.send_modal(AddItemModal())
+    
+    @discord.ui.button(label="✏️ Update Item", style=discord.ButtonStyle.blurple)
+    async def update_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if not shop_items:
+            await interaction.response.send_message("❌ No items to update!", ephemeral=True)
+            return
+        await interaction.response.send_modal(UpdateItemModal())
+    
+    @discord.ui.button(label="🗑️ Delete Item", style=discord.ButtonStyle.red)
+    async def delete_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ You don't have permission!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if not shop_items:
+            await interaction.response.send_message("❌ No items to delete!", ephemeral=True)
+            return
+        await interaction.response.send_modal(DeleteItemModal())
+
+class AddItemModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Add Shop Item")
+    
+    name = discord.ui.TextInput(label="Item Name", placeholder="Enter item name...")
+    price = discord.ui.TextInput(label="Price (tokens)", placeholder="Enter price...")
+    description = discord.ui.TextInput(label="Description (optional)", placeholder="Enter description...", required=False, style=discord.TextStyle.long)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            price_value = int(self.price.value)
+            if price_value <= 0:
+                await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        new_item = {
+            'name': self.name.value,
+            'price': price_value,
+            'description': self.description.value if self.description.value else ""
+        }
+        
+        shop_items.append(new_item)
+        save_shop_items(shop_items)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Item Added!", color=0x00ff00)
+        embed.add_field(name="Item Name", value=new_item['name'], inline=False)
+        embed.add_field(name="Price", value=f"{new_item['price']:,} 🪙", inline=False)
+        if new_item['description']:
+            embed.add_field(name="Description", value=new_item['description'], inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class UpdateItemModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Update Shop Item")
+    
+    item_number = discord.ui.TextInput(label="Item Number", placeholder="Enter item number (1, 2, 3...)...")
+    name = discord.ui.TextInput(label="New Name", placeholder="Enter new name...")
+    price = discord.ui.TextInput(label="New Price", placeholder="Enter new price...")
+    description = discord.ui.TextInput(label="New Description", placeholder="Enter new description...", required=False, style=discord.TextStyle.long)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            item_index = int(self.item_number.value) - 1
+            price_value = int(self.price.value)
+            if price_value <= 0:
+                await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter valid numbers!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if item_index < 0 or item_index >= len(shop_items):
+            await interaction.response.send_message("❌ Invalid item number!", ephemeral=True)
+            return
+        
+        old_item = shop_items[item_index].copy()
+        shop_items[item_index] = {
+            'name': self.name.value,
+            'price': price_value,
+            'description': self.description.value if self.description.value else ""
+        }
+        
+        save_shop_items(shop_items)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Item Updated!", color=0x00ff00)
+        embed.add_field(name="Old", value=f"{old_item['name']} - {old_item['price']:,} 🪙", inline=False)
+        embed.add_field(name="New", value=f"{shop_items[item_index]['name']} - {shop_items[item_index]['price']:,} 🪙", inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class DeleteItemModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Delete Shop Item")
+    
+    item_number = discord.ui.TextInput(label="Item Number to Delete", placeholder="Enter item number (1, 2, 3...)...")
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            item_index = int(self.item_number.value) - 1
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+            return
+        
+        shop_items = get_shop_items()
+        if item_index < 0 or item_index >= len(shop_items):
+            await interaction.response.send_message("❌ Invalid item number!", ephemeral=True)
+            return
+        
+        deleted_item = shop_items.pop(item_index)
+        save_shop_items(shop_items)
+        save_cache()
+        
+        embed = discord.Embed(title="✅ Item Deleted!", color=0xff0000)
+        embed.add_field(name="Deleted Item", value=f"{deleted_item['name']} - {deleted_item['price']:,} 🪙", inline=False)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="adminshop", description="Admin shop management (Admin only)")
+async def adminshop(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    shop_items = get_shop_items()
+    
+    embed = discord.Embed(title="🔧 Shop Management Panel", color=0xff9900, timestamp=datetime.now())
+    
+    if shop_items:
+        shop_text = ""
+        for i, item in enumerate(shop_items, 1):
+            shop_text += f"**{i}.** {item['name']} - {item['price']:,} 🪙\n"
+        embed.add_field(name="Current Shop Items", value=shop_text, inline=False)
+    else:
+        embed.add_field(name="Current Shop Items", value="No items in shop", inline=False)
+    
+    embed.set_footer(text="Use the buttons below to manage the shop")
+    
+    view = ShopManagementView()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class ConfirmResetView(discord.ui.View):
+    def __init__(self, admin_user):
+        super().__init__(timeout=60)
+        self.admin_user = admin_user
+    
+    @discord.ui.button(label="✅ YES, RESET ALL DATA", style=discord.ButtonStyle.red)
+    async def confirm_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.admin_user:
+            await interaction.response.send_message("❌ Only the admin who started this can confirm!", ephemeral=True)
+            return
+        
+        global user_data_cache, cache_dirty
+        user_count = len(user_data_cache)
+        user_data_cache = {}
+        cache_dirty = True
+        save_cache()
+        
+        embed = discord.Embed(
+            title="✅ Data Reset Complete!",
+            description=f"🗑️ Reset data for **{user_count}** users\n💫 All balances are now 0",
+            color=0x00ff00,
+            timestamp=datetime.now()
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+        
+        await log_action(
+            "ADMIN_RESET_DATA",
+            "🗑️ Data Reset",
+            f"**{self.admin_user.mention}** reset all user data",
+            color=0xff0000,
+            user=self.admin_user,
+            fields=[{"name": "Users Affected", "value": str(user_count), "inline": True}]
+        )
+    
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.grey)
+    async def cancel_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.admin_user:
+            await interaction.response.send_message("❌ Only the admin who started this can cancel!", ephemeral=True)
+            return
+        
+        embed = discord.Embed(title="✅ Reset Cancelled", description="No data was modified.", color=0x00ff00)
+        await interaction.response.edit_message(embed=embed, view=None)
+
+@bot.tree.command(name="resetdata", description="Reset all user data (Admin only)")
+async def resetdata(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    view = ConfirmResetView(interaction.user)
+    embed = discord.Embed(
+        title="⚠️ DANGER ZONE",
+        description="**This will permanently delete ALL user token data!**\n\n❌ This action cannot be undone!\n❌ All balances will be reset to 0!\n❌ All purchase history will be lost!",
+        color=0xff0000
+    )
+    embed.set_footer(text="Are you absolutely sure you want to proceed?")
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)True)
 
 @bot.tree.command(name="buy", description="Buy an item")
 async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 1):
