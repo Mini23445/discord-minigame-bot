@@ -392,6 +392,137 @@ class ShopManageView(discord.ui.View):
             return
         await interaction.response.send_modal(AddItemModal())
 
+class UpdateItemModal(discord.ui.Modal):
+    def __init__(self, shop_items):
+        super().__init__(title="Update Shop Item")
+        self.shop_items = shop_items
+        
+        items_list = "\n".join([f"{i+1}. {item['name']}" for i, item in enumerate(shop_items)])
+        self.item_number.placeholder = f"Items: {items_list[:100]}..."
+    
+    item_number = discord.ui.TextInput(label="Item Number to Update", placeholder="Enter number (1, 2, 3...)")
+    name = discord.ui.TextInput(label="New Name (optional)", placeholder="Leave blank to keep current", required=False)
+    price = discord.ui.TextInput(label="New Price (optional)", placeholder="Leave blank to keep current", required=False)
+    description = discord.ui.TextInput(label="New Description (optional)", placeholder="Leave blank to keep current", required=False, style=discord.TextStyle.long)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            item_idx = int(self.item_number.value) - 1
+            if item_idx < 0 or item_idx >= len(self.shop_items):
+                await interaction.response.send_message(f"❌ Invalid item number! Must be 1-{len(self.shop_items)}", ephemeral=True)
+                return
+        except:
+            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
+            return
+        
+        old_item = shop_data[item_idx].copy()
+        
+        # Update name if provided
+        if self.name.value.strip():
+            # Check for duplicates
+            for i, item in enumerate(shop_data):
+                if i != item_idx and item['name'].lower() == self.name.value.lower():
+                    await interaction.response.send_message("❌ Item with this name already exists!", ephemeral=True)
+                    return
+            shop_data[item_idx]['name'] = self.name.value.strip()
+        
+        # Update price if provided
+        if self.price.value.strip():
+            try:
+                new_price = int(self.price.value)
+                if new_price <= 0:
+                    await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
+                    return
+                shop_data[item_idx]['price'] = new_price
+            except:
+                await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+                return
+        
+        # Update description if provided
+        if self.description.value.strip():
+            shop_data[item_idx]['description'] = self.description.value.strip()
+        
+        save_data()
+        
+        embed = discord.Embed(title="✅ Item Updated!", color=0x0099ff)
+        embed.add_field(name="Old Name", value=old_item['name'], inline=True)
+        embed.add_field(name="New Name", value=shop_data[item_idx]['name'], inline=True)
+        embed.add_field(name="‎", value="‎", inline=True)
+        embed.add_field(name="Old Price", value=f"{old_item['price']:,} 🪙", inline=True)
+        embed.add_field(name="New Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=True)
+        embed.add_field(name="‎", value="‎", inline=True)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class DeleteItemModal(discord.ui.Modal):
+    def __init__(self, shop_items):
+        super().__init__(title="Delete Shop Item")
+        self.shop_items = shop_items
+        
+        items_list = "\n".join([f"{i+1}. {item['name']}" for i, item in enumerate(shop_items)])
+        self.item_number.placeholder = f"Items: {items_list[:100]}..."
+    
+    item_number = discord.ui.TextInput(label="Item Number to Delete", placeholder="Enter number (1, 2, 3...)")
+    confirmation = discord.ui.TextInput(label="Type 'DELETE' to confirm", placeholder="This cannot be undone!")
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.confirmation.value.upper() != "DELETE":
+            await interaction.response.send_message("❌ You must type 'DELETE' to confirm!", ephemeral=True)
+            return
+        
+        try:
+            item_idx = int(self.item_number.value) - 1
+            if item_idx < 0 or item_idx >= len(self.shop_items):
+                await interaction.response.send_message(f"❌ Invalid item number! Must be 1-{len(self.shop_items)}", ephemeral=True)
+                return
+        except:
+            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
+            return
+        
+        deleted_item = shop_data.pop(item_idx)
+        save_data()
+        
+        embed = discord.Embed(title="✅ Item Deleted!", color=0xff4444)
+        embed.add_field(name="Deleted Item", value=deleted_item['name'], inline=True)
+        embed.add_field(name="Price", value=f"{deleted_item['price']:,} 🪙", inline=True)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+class ShopManageView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+    
+    @discord.ui.button(label="➕ Add Item", style=discord.ButtonStyle.green)
+    async def add_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+            return
+        await interaction.response.send_modal(AddItemModal())
+    
+    @discord.ui.button(label="✏️ Update Item", style=discord.ButtonStyle.blurple)
+    async def update_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+            return
+        
+        if not shop_data:
+            await interaction.response.send_message("❌ No items in shop to update!", ephemeral=True)
+            return
+        
+        await interaction.response.send_modal(UpdateItemModal(shop_data))
+    
+    @discord.ui.button(label="🗑️ Delete Item", style=discord.ButtonStyle.red)
+    async def delete_item(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+            return
+        
+        if not shop_data:
+            await interaction.response.send_message("❌ No items in shop to delete!", ephemeral=True)
+            return
+        
+        await interaction.response.send_modal(DeleteItemModal(shop_data))
+
 @bot.tree.command(name="addshop", description="Manage shop (Admin only)")
 async def addshop(interaction: discord.Interaction):
     if not is_admin(interaction.user):
@@ -399,13 +530,33 @@ async def addshop(interaction: discord.Interaction):
         return
     
     embed = discord.Embed(title="🛍️ Shop Management", color=0xff9900)
-    embed.add_field(name="Items", value=f"{len(shop_data)} items", inline=True)
+    embed.add_field(name="📊 Stats", value=f"**Items:** {len(shop_data)}\n**Status:** {'Active' if shop_data else 'Empty'}", inline=True)
     
     if shop_data:
-        items_list = "\n".join([f"{i+1}. {item['name']} - {item['price']:,} 🪙" for i, item in enumerate(shop_data[:5])])
-        if len(shop_data) > 5:
-            items_list += f"\n... and {len(shop_data) - 5} more"
-        embed.add_field(name="Current Items", value=items_list, inline=False)
+        total_value = sum(item['price'] for item in shop_data)
+        cheapest = min(shop_data, key=lambda x: x['price'])
+        most_expensive = max(shop_data, key=lambda x: x['price'])
+        
+        embed.add_field(
+            name="💰 Price Range", 
+            value=f"**Cheapest:** {cheapest['price']:,} 🪙\n**Most Expensive:** {most_expensive['price']:,} 🪙\n**Total Value:** {total_value:,} 🪙", 
+            inline=True
+        )
+        
+        items_list = "\n".join([f"{i+1}. **{item['name']}** - {item['price']:,} 🪙" for i, item in enumerate(shop_data[:10])])
+        if len(shop_data) > 10:
+            items_list += f"\n... and {len(shop_data) - 10} more items"
+        embed.add_field(name="🛒 Current Items", value=items_list, inline=False)
+    else:
+        embed.add_field(name="🛒 Current Items", value="*No items in shop*", inline=False)
+    
+    embed.add_field(
+        name="🔧 Available Actions",
+        value="• **Add Item** - Create new shop items\n• **Update Item** - Modify existing items\n• **Delete Item** - Remove items from shop",
+        inline=False
+    )
+    
+    embed.set_footer(text="Use the buttons below to manage the shop")
     
     view = ShopManageView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
