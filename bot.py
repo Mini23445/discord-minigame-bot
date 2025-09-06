@@ -605,6 +605,200 @@ class AddItemModal(discord.ui.Modal):
             embed.add_field(name="Description", value=new_item['description'], inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        # Log the action
+        await log_action(
+            "ADMIN_ADD_ITEM",
+            "➕ Shop Item Added",
+            f"**{interaction.user.mention}** added a new item to the shop",
+            color=0x00ff00,
+            user=interaction.user,
+            fields=[
+                {"name": "Item Name", "value": new_item['name'], "inline": True},
+                {"name": "Price", "value": f"{new_item['price']:,} 🪙", "inline": True},
+                {"name": "Description", "value": new_item['description'][:100] + "..." if len(new_item['description']) > 100 else new_item['description'], "inline": False}
+            ]
+        )
+
+@bot.tree.command(name="stats", description="View server token statistics")
+async def stats(interaction: discord.Interaction):
+    total_users = len(user_data_cache)
+    total_tokens = sum(data.get('balance', 0) for data in user_data_cache.values())
+    total_earned = sum(data.get('total_earned', 0) for data in user_data_cache.values())
+    total_spent = sum(data.get('total_spent', 0) for data in user_data_cache.values())
+    total_purchases = sum(len(data.get('purchases', [])) for data in user_data_cache.values())
+    
+    embed = discord.Embed(
+        title="📊 Server Token Statistics",
+        color=0x00d4ff,
+        timestamp=datetime.now()
+    )
+    
+    embed.add_field(
+        name="👥 Active Users",
+        value=f"{total_users:,}",
+        inline=True
+    )
+    embed.add_field(
+        name="💰 Total Tokens in Circulation",
+        value=f"{total_tokens:,} 🪙",
+        inline=True
+    )
+    embed.add_field(
+        name="📈 Total Tokens Earned",
+        value=f"{total_earned:,} 🪙",
+        inline=True
+    )
+    embed.add_field(
+        name="💸 Total Tokens Spent",
+        value=f"{total_spent:,} 🪙",
+        inline=True
+    )
+    embed.add_field(
+        name="🛒 Total Purchases",
+        value=f"{total_purchases:,}",
+        inline=True
+    )
+    embed.add_field(
+        name="🏪 Shop Items",
+        value=f"{len(get_shop_items())}",
+        inline=True
+    )
+    
+    # Calculate average balance
+    avg_balance = total_tokens // total_users if total_users > 0 else 0
+    embed.add_field(
+        name="📊 Average Balance",
+        value=f"{avg_balance:,} 🪙",
+        inline=True
+    )
+    
+    embed.set_footer(text="💬 Tokens are earned by chatting!")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="daily", description="Claim your daily token bonus")
+async def daily(interaction: discord.Interaction):
+    user_id_str = str(interaction.user.id)
+    user_data = user_data_cache.get(user_id_str, {})
+    
+    # Check if user has claimed today
+    last_daily = user_data.get('last_daily', '')
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    if last_daily == today:
+        # Calculate time until next daily
+        next_daily = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        time_left = next_daily - datetime.now()
+        hours = int(time_left.total_seconds() // 3600)
+        minutes = int((time_left.total_seconds() % 3600) // 60)
+        
+        await interaction.response.send_message(
+            f"❌ You've already claimed your daily bonus today!\n"
+            f"⏰ Next daily in: **{hours}h {minutes}m**",
+            ephemeral=True
+        )
+        return
+    
+    # Calculate daily bonus (50-150 tokens, with streak bonus)
+    streak = user_data.get('daily_streak', 0)
+    base_bonus = random.randint(50, 150)
+    streak_bonus = min(streak * 5, 100)  # Max 100 bonus tokens
+    total_bonus = base_bonus + streak_bonus
+    
+    # Update user data
+    if user_id_str not in user_data_cache:
+        user_data_cache[user_id_str] = {'balance': 0, 'total_earned': 0, 'total_spent': 0, 'purchases': []}
+    
+    user_data_cache[user_id_str]['last_daily'] = today
+    user_data_cache[user_id_str]['daily_streak'] = streak + 1
+    
+    # Give tokens
+    new_balance = update_user_balance(interaction.user.id, total_bonus)
+    save_cache()
+    
+    embed = discord.Embed(
+        title="🎁 Daily Bonus Claimed!",
+        color=0x00ff00,
+        timestamp=datetime.now()
+    )
+    
+    embed.add_field(name="Base Bonus", value=f"{base_bonus} 🪙", inline=True)
+    if streak_bonus > 0:
+        embed.add_field(name="Streak Bonus", value=f"{streak_bonus} 🪙", inline=True)
+    embed.add_field(name="Total Earned", value=f"{total_bonus} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
+    embed.add_field(name="Daily Streak", value=f"{streak + 1} days 🔥", inline=True)
+    
+    embed.set_author(
+        name=interaction.user.display_name,
+        icon_url=interaction.user.display_avatar.url
+    )
+    embed.set_footer(text="Come back tomorrow for another bonus!")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="work", description="Work to earn tokens (cooldown applies)")
+async def work(interaction: discord.Interaction):
+    user_id_str = str(interaction.user.id)
+    user_data = user_data_cache.get(user_id_str, {})
+    
+    # Check cooldown (1 hour)
+    last_work = user_data.get('last_work', 0)
+    current_time = datetime.now().timestamp()
+    cooldown_time = 3600  # 1 hour in seconds
+    
+    if current_time - last_work < cooldown_time:
+        time_left = cooldown_time - (current_time - last_work)
+        minutes = int(time_left // 60)
+        seconds = int(time_left % 60)
+        
+        await interaction.response.send_message(
+            f"⏰ You're tired from working! Come back in **{minutes}m {seconds}s**",
+            ephemeral=True
+        )
+        return
+    
+    # Work outcomes
+    work_outcomes = [
+        {"job": "delivering packages", "tokens": random.randint(25, 75), "emoji": "📦"},
+        {"job": "washing dishes", "tokens": random.randint(15, 45), "emoji": "🍽️"},
+        {"job": "walking dogs", "tokens": random.randint(20, 60), "emoji": "🐕"},
+        {"job": "data entry", "tokens": random.randint(30, 80), "emoji": "💻"},
+        {"job": "street cleaning", "tokens": random.randint(20, 50), "emoji": "🧹"},
+        {"job": "tutoring students", "tokens": random.randint(40, 100), "emoji": "📚"},
+        {"job": "fixing computers", "tokens": random.randint(50, 120), "emoji": "🔧"},
+        {"job": "coding websites", "tokens": random.randint(75, 150), "emoji": "⌨️"},
+    ]
+    
+    outcome = random.choice(work_outcomes)
+    tokens_earned = outcome["tokens"]
+    
+    # Update user data
+    if user_id_str not in user_data_cache:
+        user_data_cache[user_id_str] = {'balance': 0, 'total_earned': 0, 'total_spent': 0, 'purchases': []}
+    
+    user_data_cache[user_id_str]['last_work'] = current_time
+    new_balance = update_user_balance(interaction.user.id, tokens_earned)
+    save_cache()
+    
+    embed = discord.Embed(
+        title=f"{outcome['emoji']} Work Complete!",
+        description=f"You spent an hour **{outcome['job']}** and earned **{tokens_earned} tokens** 🪙!",
+        color=0x0099ff,
+        timestamp=datetime.now()
+    )
+    
+    embed.add_field(name="Tokens Earned", value=f"{tokens_earned} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    
+    embed.set_author(
+        name=interaction.user.display_name,
+        icon_url=interaction.user.display_avatar.url
+    )
+    embed.set_footer(text="You can work again in 1 hour!")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="history", description="View your purchase history")
 async def history(interaction: discord.Interaction):
