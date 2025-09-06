@@ -656,6 +656,18 @@ class AddTokenModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             amount_value = int(self.amount.value)
+class RemoveTokenModal(discord.ui.Modal):
+    def __init__(self, target_user):
+        super().__init__(title=f"Remove Tokens from {target_user.display_name}")
+        self.target_user = target_user
+    
+    amount = discord.ui.TextInput(label="Amount to Remove", placeholder="Enter amount of tokens to remove...")
+    reason = discord.ui.TextInput(label="Reason (optional)", placeholder="Reason for removing tokens...", required=False)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            amount_value = int(self.amount.value)
+            if amount_value <= 0:
                 await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
                 return
         except ValueError:
@@ -699,7 +711,6 @@ class AddTokenModal(discord.ui.Modal):
             ]
         )
 
-# Command 8: Admin Balance
 @bot.tree.command(name="adminbalance", description="View and manage a user's balance (Admin only)")
 async def adminbalance(interaction: discord.Interaction, user: discord.Member):
     if not is_admin(interaction.user):
@@ -753,7 +764,6 @@ async def adminbalance(interaction: discord.Interaction, user: discord.Member):
     view = AdminTokenView(user)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-# Shop Management Classes
 class ConfirmResetView(discord.ui.View):
     def __init__(self, admin_user):
         super().__init__(timeout=60)
@@ -807,7 +817,6 @@ class ConfirmResetView(discord.ui.View):
         
         await interaction.response.edit_message(embed=embed, view=None)
 
-# Command 9: Reset Data
 @bot.tree.command(name="resetdata", description="Reset all user data (Admin only)")
 async def resetdata(interaction: discord.Interaction):
     if not is_admin(interaction.user):
