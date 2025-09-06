@@ -446,7 +446,96 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
         ]
     )
 
-# Error handling
+@bot.tree.command(name="history", description="View your purchase history")
+async def history(interaction: discord.Interaction):
+    user_data = user_data_cache.get(str(interaction.user.id), {})
+    purchases = user_data.get('purchases', [])
+    
+    embed = discord.Embed(
+        title="📋 Purchase History",
+        color=0x9932cc,
+        timestamp=datetime.now()
+    )
+    
+    if not purchases:
+        embed.description = "No purchases yet! Visit `/shop` to buy items."
+    else:
+        # Show last 10 purchases
+        recent_purchases = purchases[-10:]
+        history_text = ""
+        
+        for purchase in reversed(recent_purchases):
+            date = datetime.fromisoformat(purchase['timestamp']).strftime("%m/%d %H:%M")
+            qty_text = f"{purchase['quantity']}x " if purchase['quantity'] > 1 else ""
+            history_text += f"**{date}** - {qty_text}{purchase['item']} ({purchase['total_cost']:,} 🪙)\n"
+        
+        embed.add_field(name="Recent Purchases", value=history_text, inline=False)
+        
+        total_spent = user_data.get('total_spent', 0)
+        embed.add_field(name="Total Spent", value=f"{total_spent:,} 🪙", inline=True)
+        embed.add_field(name="Total Purchases", value=str(len(purchases)), inline=True)
+    
+    embed.set_author(
+        name=interaction.user.display_name,
+        icon_url=interaction.user.display_avatar.url
+    )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="leaderboard", description="View the top token holders")
+async def leaderboard(interaction: discord.Interaction):
+    # Sort users by balance
+    sorted_users = sorted(
+        user_data_cache.items(),
+        key=lambda x: x[1].get('balance', 0),
+        reverse=True
+    )[:10]
+    
+    embed = discord.Embed(
+        title="🏆 Token Leaderboard",
+        color=0xffd700,
+        timestamp=datetime.now()
+    )
+    
+    if not sorted_users:
+        embed.description = "No users with tokens yet!"
+    else:
+        leaderboard_text = ""
+        medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+        
+        for i, (user_id, data) in enumerate(sorted_users):
+            try:
+                user = bot.get_user(int(user_id))
+                username = user.display_name if user else f"User {user_id}"
+                balance = data.get('balance', 0)
+                rank = get_user_rank(balance)
+                
+                leaderboard_text += f"{medals[i]} **{username}** - {balance:,} 🪙 {rank}\n"
+            except:
+                continue
+        
+        embed.description = leaderboard_text
+    
+    embed.set_footer(text="Keep chatting to climb the leaderboard!")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="resetdata", description="Reset all user data (Admin only)")
+async def resetdata(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    # Confirmation view
+    view = ConfirmResetView(interaction.user)
+    embed = discord.Embed(
+        title="⚠️ DANGER ZONE",
+        description="**This will permanently delete ALL user token data!**\n\n❌ This action cannot be undone!\n❌ All balances will be reset to 0!\n❌ All purchase history will be lost!",
+        color=0xff0000
+    )
+    embed.set_footer(text="Are you absolutely sure you want to proceed?")
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
