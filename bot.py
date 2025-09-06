@@ -446,87 +446,19 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
         ]
     )
 
-@bot.tree.command(name="addtoken", description="Add tokens to a user (Admin only)")
-async def addtoken(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+# Error handling
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
         return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
-        return
-    
-    old_balance = get_user_balance(user.id)
-    new_balance = update_user_balance(user.id, amount)
-    save_cache()
-    
-    embed = discord.Embed(
-        title="✅ Tokens Added",
-        color=0x00ff00,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="User", value=user.mention, inline=True)
-    embed.add_field(name="Amount Added", value=f"{amount:,} 🪙", inline=True)
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    await log_action(
-        "ADMIN_ADD_TOKENS",
-        "➕ Tokens Added",
-        f"**{interaction.user.mention}** added tokens to **{user.mention}**",
-        color=0x00ff00,
-        user=user,
-        fields=[
-            {"name": "Admin", "value": interaction.user.mention, "inline": True},
-            {"name": "Amount Added", "value": f"{amount:,} 🪙", "inline": True},
-            {"name": "Old Balance", "value": f"{old_balance:,} 🪙", "inline": True},
-            {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
-        ]
-    )
+    print(f"Error: {error}")
 
-@bot.tree.command(name="removetoken", description="Remove tokens from a user (Admin only)")
-async def removetoken(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not is_admin(interaction.user):
-        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
-        return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
-        return
-    
-    current_balance = get_user_balance(user.id)
-    if current_balance < amount:
-        await interaction.response.send_message(f"❌ User only has {current_balance:,} tokens! Cannot remove {amount:,}.", ephemeral=True)
-        return
-    
-    new_balance = update_user_balance(user.id, -amount)
-    save_cache()
-    
-    embed = discord.Embed(
-        title="✅ Tokens Removed",
-        color=0xff6600,
-        timestamp=datetime.now()
-    )
-    embed.add_field(name="User", value=user.mention, inline=True)
-    embed.add_field(name="Amount Removed", value=f"{amount:,} 🪙", inline=True)
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    
-    await log_action(
-        "ADMIN_REMOVE_TOKENS",
-        "➖ Tokens Removed",
-        f"**{interaction.user.mention}** removed tokens from **{user.mention}**",
-        color=0xff6600,
-        user=user,
-        fields=[
-            {"name": "Admin", "value": interaction.user.mention, "inline": True},
-            {"name": "Amount Removed", "value": f"{amount:,} 🪙", "inline": True},
-            {"name": "Old Balance", "value": f"{current_balance:,} 🪙", "inline": True},
-            {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
-        ]
-    )
+if __name__ == "__main__":
+    TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+    if not TOKEN:
+        print("❌ Please set the DISCORD_BOT_TOKEN environment variable!")
+    else:
+        bot.run(TOKEN)
 
 class ShopManagementView(discord.ui.View):
     def __init__(self):
