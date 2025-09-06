@@ -726,6 +726,20 @@ async def resetdata(interaction: discord.Interaction, confirmation_code: str):
             success_embed.set_footer(text=f"Reset by {interaction.user.display_name}")
             
             await button_interaction.response.edit_message(embed=success_embed, view=None)
+            
+            # Log data reset action
+            await log_action(
+                "DATA_RESET",
+                "🗑️ All Data Reset",
+                f"**{interaction.user.mention}** performed a complete data reset",
+                color=0xff0000,
+                user=interaction.user,
+                fields=[
+                    {"name": "Action", "value": "All user data deleted", "inline": True},
+                    {"name": "Users Affected", "value": "All server members", "inline": True},
+                    {"name": "Reset Time", "value": f"<t:{int(datetime.now().timestamp())}:F>", "inline": False}
+                ]
+            )
         
         @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.secondary)
         async def cancel_reset(self, button_interaction: discord.Interaction, button: discord.ui.Button):
