@@ -5,6 +5,7 @@ import os
 import random
 import asyncio
 from datetime import datetime
+import aiofiles
 
 # Bot configuration
 intents = discord.Intents.default()
@@ -20,8 +21,57 @@ ADMIN_ROLE_ID = 1410911675351306250
 USER_DATA_FILE = 'user_data.json'
 SHOP_DATA_FILE = 'shop_data.json'
 
+# Data cache to prevent frequent file I/O
+user_data_cache = {}
+shop_data_cache = []
+cache_dirty = False
+
+async def load_data_async(filename, default_data=None):
+    """Async load data from JSON file with error handling"""
+    if default_data is None:
+        default_data = {}
+    try:
+        if os.path.exists(filename):
+            async with aiofiles.open(filename, 'r') as f:
+                content = await f.read()
+                return json.loads(content)
+        else:
+            await save_data_async(filename, default_data)
+            return default_data
+    except Exception as e:
+        print(f"Error loading {filename}: {e}")
+        return default_data
+
+async def save_data_async(filename, data):
+    """Async save data to JSON file with backup"""
+    try:
+        # Create backup first
+        if os.path.exists(filename):
+            backup_name = f"{filename}.backup"
+            if os.path.exists(backup_name):
+                os.remove(backup_name)
+            os.rename(filename, backup_name)
+        
+        # Save new data
+        async with aiofiles.open(filename, 'w') as f:
+            await f.write(json.dumps(data, indent=4))
+        
+        # Remove backup if successful
+        backup_name = f"{filename}.backup"
+        if os.path.exists(backup_name):
+            os.remove(backup_name)
+            
+    except Exception as e:
+        print(f"Error saving {filename}: {e}")
+        # Restore backup if save failed
+        backup_name = f"{filename}.backup"
+        if os.path.exists(backup_name):
+            if os.path.exists(filename):
+                os.remove(filename)
+            os.rename(backup_name, filename)
+
 def load_data(filename, default_data=None):
-    """Load data from JSON file"""
+    """Sync load data from JSON file"""
     if default_data is None:
         default_data = {}
     try:
@@ -34,48 +84,96 @@ def load_data(filename, default_data=None):
         return default_data
 
 def save_data(filename, data):
-    """Save data to JSON file"""
+    """Sync save data to JSON file with backup"""
     try:
+        # Create backup first
+        if os.path.exists(filename):
+            backup_name = f"{filename}.backup"
+            if os.path.exists(backup_name):
+                os.remove(backup_name)
+            os.rename(filename, backup_name)
+        
+        # Save new data
         with open(filename, 'w') as f:
             json.dump(data, f, indent=4)
+        
+        # Remove backup if successful
+        backup_name = f"{filename}.backup"
+        if os.path.exists(backup_name):
+            os.remove(backup_name)
+            
     except Exception as e:
-        print(f"Error saving data: {e}")
+        print(f"Error saving {filename}: {e}")
+        # Restore backup if save failed
+        backup_name = f"{filename}.backup"
+        if os.path.exists(backup_name):
+            if os.path.exists(filename):
+                os.remove(filename)
+            os.rename(backup_name, filename)
+
+async def init_cache():
+    """Initialize data cache"""
+    global user_data_cache, shop_data_cache
+    user_data_cache = await load_data_async(USER_DATA_FILE, {})
+    shop_data_cache = await load_data_async(SHOP_DATA_FILE, [])
+
+async def save_cache():
+    """Save cache to files"""
+    global cache_dirty
+    if cache_dirty:
+        await save_data_async(USER_DATA_FILE, user_data_cache)
+        await save_data_async(SHOP_DATA_FILE, shop_data_cache)
+        cache_dirty = False
 
 def get_user_balance(user_id):
-    """Get user's token balance"""
-    user_data = load_data(USER_DATA_FILE)
-    return user_data.get(str(user_id), {}).get('balance', 0)
+    """Get user's token balance from cache"""
+    global user_data_cache
+    return user_data_cache.get(str(user_id), {}).get('balance', 0)
 
 def update_user_balance(user_id, amount):
-    """Update user's token balance"""
-    user_data = load_data(USER_DATA_FILE)
+    """Update user's token balance in cache"""
+    global user_data_cache, cache_dirty
     user_id_str = str(user_id)
     
-    if user_id_str not in user_data:
-        user_data[user_id_str] = {'balance': 0, 'total_earned': 0}
+    if user_id_str not in user_data_cache:
+        user_data_cache[user_id_str] = {'balance': 0, 'total_earned': 0}
     
-    user_data[user_id_str]['balance'] += amount
+    user_data_cache[user_id_str]['balance'] += amount
     if amount > 0:
-        user_data[user_id_str]['total_earned'] = user_data[user_id_str].get('total_earned', 0) + amount
+        user_data_cache[user_id_str]['total_earned'] = user_data_cache[user_id_str].get('total_earned', 0) + amount
     
-    save_data(USER_DATA_FILE, user_data)
-    return user_data[user_id_str]['balance']
+    cache_dirty = True
+    return user_data_cache[user_id_str]['balance']
 
 def get_shop_items():
-    """Get all shop items"""
-    return load_data(SHOP_DATA_FILE, [])
+    """Get all shop items from cache"""
+    global shop_data_cache
+    return shop_data_cache
 
 def save_shop_items(items):
-    """Save shop items"""
-    save_data(SHOP_DATA_FILE, items)
+    """Save shop items to cache"""
+    global shop_data_cache, cache_dirty
+    shop_data_cache = items
+    cache_dirty = True
 
 def is_admin(user):
     """Check if user has admin role"""
     return any(role.id == ADMIN_ROLE_ID for role in user.roles)
 
+# Auto-save task
+async def auto_save_task():
+    """Automatically save cache every 30 seconds"""
+    while True:
+        await asyncio.sleep(30)
+        await save_cache()
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} has landed! 🚀')
+    await init_cache()
+    # Start auto-save task
+    bot.loop.create_task(auto_save_task())
+    
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
@@ -98,57 +196,242 @@ async def on_message(message):
 @bot.tree.command(name="balance", description="Check your token balance")
 async def balance(interaction: discord.Interaction):
     user_balance = get_user_balance(interaction.user.id)
-    user_data = load_data(USER_DATA_FILE)
-    total_earned = user_data.get(str(interaction.user.id), {}).get('total_earned', 0)
+    user_data = user_data_cache.get(str(interaction.user.id), {})
+    total_earned = user_data.get('total_earned', 0)
     
     embed = discord.Embed(
-        title="💰 Token Balance",
-        color=0x00ff00,
+        title="💰 Your Token Wallet",
+        color=0xffd700,
         timestamp=datetime.now()
     )
     embed.set_author(
         name=interaction.user.display_name,
         icon_url=interaction.user.display_avatar.url
     )
+    
+    # Add a nice gradient-like effect with emojis
     embed.add_field(
         name="🪙 Current Balance",
-        value=f"**{user_balance:,}** Tokens",
-        inline=False
+        value=f"```yaml\n{user_balance:,} Tokens```",
+        inline=True
     )
     embed.add_field(
-        name="📈 Total Earned",
-        value=f"**{total_earned:,}** Tokens",
+        name="📊 Total Earned",
+        value=f"```yaml\n{total_earned:,} Tokens```",
+        inline=True
+    )
+    embed.add_field(
+        name="💎 Rank",
+        value=f"```yaml\n{'Wealthy' if user_balance > 1000 else 'Growing' if user_balance > 500 else 'Starter'}```",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="💬 Keep Chatting!",
+        value="Each message earns you **1-5 tokens** 🎲",
         inline=False
     )
-    embed.set_footer(text="Keep chatting to earn more tokens! 💬")
     
-    await interaction.response.send_message(embed=embed)
+    embed.set_footer(
+        text="💡 Tip: Visit /shop to spend your tokens!",
+        icon_url="https://cdn.discordapp.com/emojis/741690892862291979.png"
+    )
+    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/868087971687448648.png")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.tree.command(name="shop", description="View the shop")
+@bot.tree.command(name="shop", description="Browse the token shop")
 async def shop(interaction: discord.Interaction):
     shop_items = get_shop_items()
     
     embed = discord.Embed(
-        title="🛒 Token Shop",
-        color=0x0099ff,
+        title="🏪 ✨ Token Marketplace ✨",
+        color=0x00d4ff,
         timestamp=datetime.now()
     )
     
-    if not shop_items:
-        embed.description = "🚫 The shop is currently empty!"
-    else:
-        shop_text = ""
-        for i, item in enumerate(shop_items, 1):
-            shop_text += f"**{i}.** {item['name']}\n"
-            shop_text += f"💰 **{item['price']:,}** Tokens\n"
-            if item.get('description'):
-                shop_text += f"📝 *{item['description']}*\n"
-            shop_text += "\n"
-        
-        embed.description = shop_text
+    embed.set_author(
+        name="Premium Shop",
+        icon_url="https://cdn.discordapp.com/emojis/894678037803618334.png"
+    )
     
-    embed.set_footer(text="Use tokens to purchase items! 💳")
-    await interaction.response.send_message(embed=embed)
+    if not shop_items:
+        embed.description = "```\n🚫 The shop is temporarily closed!\n   New items coming soon...\n```"
+        embed.set_image(url="https://cdn.discordapp.com/emojis/692028527239962626.png")
+    else:
+        user_balance = get_user_balance(interaction.user.id)
+        embed.add_field(
+            name="💰 Your Balance",
+            value=f"```yaml\n{user_balance:,} Tokens```",
+            inline=False
+        )
+        
+        # Create sections for different price ranges
+        premium_items = []
+        regular_items = []
+        budget_items = []
+        
+        for i, item in enumerate(shop_items, 1):
+            item_text = f"**{i}.** 🎁 **{item['name']}**\n"
+            
+            # Add price with affordability indicator
+            if user_balance >= item['price']:
+                item_text += f"💰 ~~{item['price']:,}~~ ✅ **AFFORDABLE**\n"
+            else:
+                item_text += f"💰 **{item['price']:,} Tokens**\n"
+            
+            if item.get('description'):
+                item_text += f"📝 *{item['description']}*\n"
+            item_text += "━━━━━━━━━━━━━━━━━━━━\n"
+            
+            # Categorize by price
+            if item['price'] >= 10000:
+                premium_items.append(item_text)
+            elif item['price'] >= 1000:
+                regular_items.append(item_text)
+            else:
+                budget_items.append(item_text)
+        
+        # Add categorized items
+        if budget_items:
+            embed.add_field(
+                name="🟢 Budget Items (Under 1,000 tokens)",
+                value="".join(budget_items),
+                inline=False
+            )
+        
+        if regular_items:
+            embed.add_field(
+                name="🟡 Premium Items (1,000-9,999 tokens)",
+                value="".join(regular_items),
+                inline=False
+            )
+        
+        if premium_items:
+            embed.add_field(
+                name="🔴 Exclusive Items (10,000+ tokens)",
+                value="".join(premium_items),
+                inline=False
+            )
+    
+    embed.set_footer(
+        text="💡 Purchase system coming soon! | Keep earning tokens by chatting 💬",
+        icon_url="https://cdn.discordapp.com/emojis/741690892862291979.png"
+    )
+    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/868087971687448648.png")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="addtoken", description="Add tokens to a user (Admin only)")
+async def addtoken(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    new_balance = update_user_balance(user.id, amount)
+    
+    embed = discord.Embed(
+        title="✅ Tokens Added Successfully!",
+        color=0x00ff00,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="👤 User", value=user.mention, inline=True)
+    embed.add_field(name="➕ Tokens Added", value=f"{amount:,}", inline=True)
+    embed.add_field(name="💰 New Balance", value=f"{new_balance:,}", inline=True)
+    embed.set_footer(text=f"Action performed by {interaction.user.display_name}")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="removetoken", description="Remove tokens from a user (Admin only)")
+async def removetoken(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    current_balance = get_user_balance(user.id)
+    if current_balance < amount:
+        await interaction.response.send_message(f"❌ User only has {current_balance:,} tokens! Cannot remove {amount:,}.", ephemeral=True)
+        return
+    
+    new_balance = update_user_balance(user.id, -amount)
+    
+    embed = discord.Embed(
+        title="✅ Tokens Removed Successfully!",
+        color=0xff6600,
+        timestamp=datetime.now()
+    )
+    embed.add_field(name="👤 User", value=user.mention, inline=True)
+    embed.add_field(name="➖ Tokens Removed", value=f"{amount:,}", inline=True)
+    embed.add_field(name="💰 New Balance", value=f"{new_balance:,}", inline=True)
+    embed.set_footer(text=f"Action performed by {interaction.user.display_name}")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="resetdata", description="Reset all user data (Admin only)")
+async def resetdata(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ You don't have permission to use this command!", ephemeral=True)
+        return
+    
+    # Confirmation view
+    view = ConfirmResetView(interaction.user)
+    embed = discord.Embed(
+        title="⚠️ DANGER ZONE",
+        description="**This will permanently delete ALL user token data!**\n\n❌ This action cannot be undone!\n❌ All balances will be reset to 0!\n❌ All earning history will be lost!",
+        color=0xff0000
+    )
+    embed.set_footer(text="Are you absolutely sure you want to proceed?")
+    
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class ConfirmResetView(discord.ui.View):
+    def __init__(self, admin_user):
+        super().__init__(timeout=60)
+        self.admin_user = admin_user
+    
+    @discord.ui.button(label="✅ YES, RESET ALL DATA", style=discord.ButtonStyle.red)
+    async def confirm_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.admin_user:
+            await interaction.response.send_message("❌ Only the admin who initiated this can confirm!", ephemeral=True)
+            return
+        
+        global user_data_cache, cache_dirty
+        user_count = len(user_data_cache)
+        user_data_cache = {}
+        cache_dirty = True
+        await save_cache()
+        
+        embed = discord.Embed(
+            title="✅ Data Reset Complete!",
+            description=f"🗑️ Reset data for **{user_count}** users\n💫 All balances are now 0\n🔄 Token earning is ready to restart!",
+            color=0x00ff00,
+            timestamp=datetime.now()
+        )
+        embed.set_footer(text=f"Reset performed by {self.admin_user.display_name}")
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+    
+    @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.grey)
+    async def cancel_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.admin_user:
+            await interaction.response.send_message("❌ Only the admin who initiated this can cancel!", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="✅ Reset Cancelled",
+            description="No data was modified. All user balances remain intact.",
+            color=0x00ff00
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
 
 class ShopManagementView(discord.ui.View):
     def __init__(self):
@@ -220,6 +503,7 @@ class AddItemModal(discord.ui.Modal):
         
         shop_items.append(new_item)
         save_shop_items(shop_items)
+        await save_cache()
         
         embed = discord.Embed(
             title="✅ Item Added Successfully!",
@@ -273,6 +557,7 @@ class UpdateItemModal(discord.ui.Modal):
         }
         
         save_shop_items(shop_items)
+        await save_cache()
         
         embed = discord.Embed(
             title="✅ Item Updated Successfully!",
@@ -304,6 +589,7 @@ class DeleteItemModal(discord.ui.Modal):
         
         deleted_item = shop_items.pop(item_index)
         save_shop_items(shop_items)
+        await save_cache()
         
         embed = discord.Embed(
             title="✅ Item Deleted Successfully!",
@@ -340,6 +626,12 @@ async def adminshop(interaction: discord.Interaction):
     view = ShopManagementView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+# Graceful shutdown
+@bot.event
+async def on_disconnect():
+    print("Bot disconnected, saving data...")
+    await save_cache()
+
 # Error handling
 @bot.event
 async def on_command_error(ctx, error):
@@ -354,4 +646,8 @@ if __name__ == "__main__":
     if not TOKEN:
         print("❌ Please set the DISCORD_BOT_TOKEN environment variable!")
     else:
-        bot.run(TOKEN)
+        try:
+            bot.run(TOKEN)
+        finally:
+            # Save data on shutdown
+            asyncio.run(save_cache())
