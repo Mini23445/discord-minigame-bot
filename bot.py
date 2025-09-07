@@ -1025,15 +1025,19 @@ async def addshop(interaction: discord.Interaction):
     view = ShopManageView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-# Run the bot
+# Run the bot with enhanced error handling
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_BOT_TOKEN')
     if not TOKEN:
         print("❌ No DISCORD_BOT_TOKEN found!")
     else:
         try:
+            print("🚀 Starting bot...")
             bot.run(TOKEN)
+        except KeyboardInterrupt:
+            print("\n🛑 Bot stopped by user")
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"❌ Bot error: {e}")
         finally:
-            save_data()
+            print("🔄 Bot shutting down...")
+            force_save_on_exit()
