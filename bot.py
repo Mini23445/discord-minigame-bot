@@ -1043,6 +1043,8 @@ async def about(ctx):
             "`/daily` - Claim daily tokens (24h cooldown)\n"
             "`/work` - Work for tokens (3h cooldown)\n"
             "`/crime` - Risky crime for tokens (1h cooldown)\n"
+            "`/coinflip <amount> <heads/tails>` - Bet tokens on coinflip\n"
+            "`/duel <user> <amount>` - Challenge someone to coinflip\n"
             "`/gift <user> <amount>` - Gift tokens to another user"
         ),
         inline=False
