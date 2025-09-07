@@ -394,8 +394,12 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
         return
     
-    result = random.choice(['heads', 'tails'])
-    won = choice == result
+    # Make coinflip 15% more likely for the member to lose (57.5% chance to lose)
+    win_chance = 42.5  # 42.5% chance to win
+    random_number = random.uniform(0, 100)
+    won = random_number <= win_chance
+    
+    result = choice if won else ('tails' if choice == 'heads' else 'heads')
     
     if won:
         winnings = amount
@@ -426,7 +430,8 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         fields=[
             {"name": "Bet Amount", "value": f"{amount:,} 🪙", "inline": True},
             {"name": "Choice", "value": choice.title(), "inline": True},
-            {"name": "Result", "value": result.title(), "inline": True}
+            {"name": "Result", "value": result.title(), "inline": True},
+            {"name": "Outcome", "value": "Won" if won else "Lost", "inline": True}
         ]
     )
     
