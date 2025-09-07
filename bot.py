@@ -1,4 +1,643 @@
-balance = get_user_balance(interaction.user.id)
+import discord
+from discord.ext import commands
+import json
+import os
+import random
+import asyncio
+from datetime import datetime, timedelta
+import time
+import sys
+
+# Railway logging setup
+import logging
+logging.basicConfig(level=logging.INFO)
+
+print("🚀 Starting Discord Bot...")
+
+# Bot setup
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Configuration
+ADMIN_ROLE_ID = 1410911675351306250
+LOG_CHANNEL_ID = 1413818486404415590
+PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
+
+# Data storage
+user_data = {}
+shop_data = []
+cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
+pending_duels = {}
+
+# Work jobs and crimes
+WORK_JOBS = [
+    "delivered pizzas", "walked dogs", "cleaned houses", "tutored students",
+    "fixed computers", "painted fences", "washed cars", "mowed lawns"
+]
+
+CRIME_ACTIVITIES = [
+    "pickpocketed a stranger", "hacked a vending machine", "sneaked into a movie",
+    "stole candy from a store", "jumped a subway turnstile", "copied homework"
+]
+
+def load_data():
+    """Load all data from files"""
+    global user_data, shop_data, cooldowns
+    try:
+        if os.path.exists('user_data.json'):
+            with open('user_data.json', 'r') as f:
+                user_data = json.load(f)
+        if os.path.exists('shop_data.json'):
+            with open('shop_data.json', 'r') as f:
+                shop_data = json.load(f)
+        if os.path.exists('cooldowns.json'):
+            with open('cooldowns.json', 'r') as f:
+                cooldowns = json.load(f)
+        print("✅ Data loaded successfully")
+    except Exception as e:
+        print(f"⚠️ Error loading data: {e}")
+
+def save_data():
+    """Save all data to files"""
+    try:
+        with open('user_data.json', 'w') as f:
+            json.dump(user_data, f, indent=2)
+        with open('shop_data.json', 'w') as f:
+            json.dump(shop_data, f, indent=2)
+        with open('cooldowns.json', 'w') as f:
+            json.dump(cooldowns, f, indent=2)
+    except Exception as e:
+        print(f"⚠️ Error saving data: {e}")
+
+def force_save_on_exit():
+    """Force save data when bot shuts down"""
+    try:
+        save_data()
+        print("💾 Data saved on exit")
+    except Exception as e:
+        print(f"⚠️ Error saving on exit: {e}")
+
+async def log_action(action_type, title, description, color=0x0099ff, user=None, fields=None):
+    """Send log message to the log channel"""
+    try:
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if not log_channel:
+            print(f"⚠️ Log channel {LOG_CHANNEL_ID} not found!")
+            return
+        
+        embed = discord.Embed(
+            title=title,
+            description=description,
+            color=color,
+            timestamp=datetime.now()
+        )
+        
+        if user:
+            embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
+        
+        if fields:
+            for field in fields:
+                embed.add_field(
+                    name=field.get("name", "Field"),
+                    value=field.get("value", "No value"),
+                    inline=field.get("inline", True)
+                )
+        
+        embed.set_footer(text=f"Action: {action_type}")
+        await log_channel.send(embed=embed)
+        
+    except Exception as e:
+        print(f"⚠️ Error sending log: {e}")
+
+async def log_purchase(user, item_name, price, quantity=1):
+    """Log purchase to purchase log channel"""
+    try:
+        purchase_channel = bot.get_channel(PURCHASE_LOG_CHANNEL_ID)
+        if not purchase_channel:
+            print(f"⚠️ Purchase log channel {PURCHASE_LOG_CHANNEL_ID} not found!")
+            return
+        
+        embed = discord.Embed(
+            title="🛒 Purchase Made",
+            color=0x00ff00,
+            timestamp=datetime.now()
+        )
+        
+        embed.add_field(name="User", value=user.mention, inline=True)
+        embed.add_field(name="Item", value=item_name, inline=True)
+        embed.add_field(name="Quantity", value=str(quantity), inline=True)
+        embed.add_field(name="Total Cost", value=f"{price * quantity:,} 🪙", inline=True)
+        embed.add_field(name="Unit Price", value=f"{price:,} 🪙", inline=True)
+        
+        embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
+        await purchase_channel.send(embed=embed)
+        
+    except Exception as e:
+        print(f"⚠️ Error sending purchase log: {e}")
+
+def get_user_balance(user_id):
+    """Get user balance"""
+    return user_data.get(str(user_id), {}).get('balance', 0)
+
+def update_balance(user_id, amount):
+    """Update user balance"""
+    user_id = str(user_id)
+    if user_id not in user_data:
+        user_data[user_id] = {'balance': 0, 'total_earned': 0, 'total_spent': 0}
+    
+    user_data[user_id]['balance'] += amount
+    if amount > 0:
+        user_data[user_id]['total_earned'] = user_data[user_id].get('total_earned', 0) + amount
+    else:
+        user_data[user_id]['total_spent'] = user_data[user_id].get('total_spent', 0) + abs(amount)
+    
+    return user_data[user_id]['balance']
+
+def get_rank(balance):
+    """Get user rank"""
+    if balance >= 100000: return "🏆 Legendary"
+    elif balance >= 50000: return "💎 Elite"
+    elif balance >= 20000: return "🥇 VIP"
+    elif balance >= 10000: return "🥈 Premium"
+    elif balance >= 5000: return "🥉 Gold"
+    elif balance >= 1000: return "🟢 Silver"
+    else: return "🔵 Starter"
+
+def can_use_command(user_id, command_type, hours):
+    """Check if user can use command with persistent cooldowns"""
+    user_id = str(user_id)
+    if user_id not in cooldowns[command_type]:
+        return True, None
+    
+    try:
+        last_used = datetime.fromisoformat(cooldowns[command_type][user_id])
+        next_use = last_used + timedelta(hours=hours)
+        if datetime.now() >= next_use:
+            return True, None
+        return False, next_use
+    except:
+        return True, None
+
+def can_use_short_cooldown(user_id, command_type, seconds):
+    """Check short cooldowns"""
+    user_id = str(user_id)
+    if user_id not in cooldowns[command_type]:
+        return True
+    
+    try:
+        last_used = float(cooldowns[command_type][user_id])
+        if time.time() - last_used >= seconds:
+            return True
+        return False
+    except:
+        return True
+
+def set_short_cooldown(user_id, command_type):
+    """Set short cooldown using timestamp"""
+    cooldowns[command_type][str(user_id)] = str(time.time())
+
+def format_time(next_use):
+    """Format time remaining"""
+    try:
+        remaining = next_use - datetime.now()
+        hours = int(remaining.total_seconds() // 3600)
+        minutes = int((remaining.total_seconds() % 3600) // 60)
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        return f"{minutes}m"
+    except:
+        return "soon"
+
+def is_admin(user):
+    """Check if user is admin"""
+    return any(role.id == ADMIN_ROLE_ID for role in user.roles)
+
+# Auto-save task
+async def auto_save():
+    """Auto save every 30 seconds"""
+    while True:
+        await asyncio.sleep(30)
+        save_data()
+
+# Clean up expired duels
+async def cleanup_expired_duels():
+    """Clean up expired duel challenges"""
+    while True:
+        await asyncio.sleep(300)  # 5 minutes
+        current_time = datetime.now()
+        expired_duels = []
+        
+        for duel_key, duel_data in pending_duels.items():
+            try:
+                created_at = duel_data['created_at']
+                if (current_time - created_at).total_seconds() > 300:
+                    expired_duels.append(duel_key)
+            except:
+                expired_duels.append(duel_key)
+        
+        for expired_key in expired_duels:
+            del pending_duels[expired_key]
+
+@bot.event
+async def on_ready():
+    print(f'🚀 {bot.user} is online!')
+    load_data()
+    
+    # Start background tasks
+    asyncio.create_task(auto_save())
+    asyncio.create_task(cleanup_expired_duels())
+    
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} commands")
+    except Exception as e:
+        print(f"❌ Failed to sync: {e}")
+
+@bot.event
+async def on_message(message):
+    if not message.author.bot and message.guild:
+        tokens = random.randint(1, 5)
+        update_balance(message.author.id, tokens)
+    await bot.process_commands(message)
+
+@bot.tree.command(name="balance", description="Check your token balance")
+async def balance(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    balance = get_user_balance(interaction.user.id)
+    data = user_data.get(user_id, {})
+    earned = data.get('total_earned', 0)
+    spent = data.get('total_spent', 0)
+    rank = get_rank(balance)
+    
+    embed = discord.Embed(
+        title="💰 Token Wallet",
+        color=0x7B68EE,
+        timestamp=datetime.now()
+    )
+    
+    embed.add_field(name="Current Balance", value=f"**{balance:,}** 🪙", inline=True)
+    embed.add_field(name="Rank", value=rank, inline=True)
+    embed.add_field(name="Total Spent", value=f"{spent:,} 🪙", inline=True)
+    embed.add_field(name="Total Earned", value=f"{earned:,} 🪙", inline=True)
+    embed.add_field(name="‎", value="‎", inline=True)
+    embed.add_field(name="‎", value="‎", inline=True)
+    
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    embed.set_footer(text="💬 Chat to earn 1-5 tokens per message")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="daily", description="Claim daily tokens (24h cooldown)")
+async def daily(interaction: discord.Interaction):
+    can_use, next_use = can_use_command(interaction.user.id, "daily", 24)
+    
+    if not can_use:
+        time_left = format_time(next_use)
+        await interaction.response.send_message(f"⏰ Daily already claimed! Come back in **{time_left}**", ephemeral=True)
+        return
+    
+    tokens = random.randint(50, 200)
+    new_balance = update_balance(interaction.user.id, tokens)
+    cooldowns["daily"][str(interaction.user.id)] = datetime.now().isoformat()
+    save_data()
+    
+    embed = discord.Embed(title="🎁 Daily Reward!", color=0x00ff00)
+    embed.add_field(name="Earned", value=f"{tokens:,} 🪙", inline=True)
+    embed.add_field(name="Balance", value=f"{new_balance:,} 🪙", inline=True)
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="work", description="Work for tokens (3h cooldown)")
+async def work(interaction: discord.Interaction):
+    can_use, next_use = can_use_command(interaction.user.id, "work", 3)
+    
+    if not can_use:
+        time_left = format_time(next_use)
+        await interaction.response.send_message(f"💼 Still tired! Rest for **{time_left}** more", ephemeral=True)
+        return
+    
+    tokens = random.randint(50, 300)
+    job = random.choice(WORK_JOBS)
+    new_balance = update_balance(interaction.user.id, tokens)
+    cooldowns["work"][str(interaction.user.id)] = datetime.now().isoformat()
+    save_data()
+    
+    embed = discord.Embed(title="💼 Work Complete!", color=0x4CAF50)
+    embed.add_field(name="Job", value=f"You {job}", inline=False)
+    embed.add_field(name="Earned", value=f"{tokens:,} 🪙", inline=True)
+    embed.add_field(name="Balance", value=f"{new_balance:,} 🪙", inline=True)
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="crime", description="Commit crime for tokens (1h cooldown, risky!)")
+async def crime(interaction: discord.Interaction):
+    can_use, next_use = can_use_command(interaction.user.id, "crime", 1)
+    
+    if not can_use:
+        time_left = format_time(next_use)
+        await interaction.response.send_message(f"🚔 Lay low for **{time_left}** more!", ephemeral=True)
+        return
+    
+    success = random.choice([True, False])
+    activity = random.choice(CRIME_ACTIVITIES)
+    
+    if success:
+        tokens = random.randint(75, 400)
+        new_balance = update_balance(interaction.user.id, tokens)
+        embed = discord.Embed(title="🎭 Crime Success!", color=0x00ff00)
+        embed.add_field(name="Crime", value=f"You {activity}", inline=False)
+        embed.add_field(name="Gained", value=f"+{tokens:,} 🪙", inline=True)
+    else:
+        tokens = random.randint(25, 200)
+        current = get_user_balance(interaction.user.id)
+        tokens = min(tokens, current)
+        new_balance = update_balance(interaction.user.id, -tokens)
+        embed = discord.Embed(title="🚔 Crime Failed!", color=0xff4444)
+        embed.add_field(name="Crime", value=f"Tried to {activity}", inline=False)
+        embed.add_field(name="Lost", value=f"-{tokens:,} 🪙", inline=True)
+    
+    embed.add_field(name="Balance", value=f"{new_balance:,} 🪙", inline=True)
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    
+    cooldowns["crime"][str(interaction.user.id)] = datetime.now().isoformat()
+    save_data()
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="coinflip", description="Bet tokens on a coinflip")
+async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
+    if not can_use_short_cooldown(interaction.user.id, "coinflip", 5):
+        await interaction.response.send_message("⏰ Please wait 5 seconds between coinflips!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Bet amount must be greater than 0!", ephemeral=True)
+        return
+    
+    choice = choice.lower()
+    if choice not in ['heads', 'tails', 'h', 't']:
+        await interaction.response.send_message("❌ Choose 'heads' or 'tails' (or 'h'/'t')!", ephemeral=True)
+        return
+    
+    if choice in ['h', 'heads']:
+        choice = 'heads'
+    else:
+        choice = 'tails'
+    
+    balance = get_user_balance(interaction.user.id)
+    if balance < amount:
+        await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
+        return
+    
+    result = random.choice(['heads', 'tails'])
+    won = choice == result
+    
+    if won:
+        winnings = amount
+        new_balance = update_balance(interaction.user.id, winnings)
+        embed = discord.Embed(title="🪙 Coinflip - YOU WON!", color=0x00ff00)
+        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
+        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
+        embed.add_field(name="Winnings", value=f"+{winnings:,} 🪙", inline=True)
+    else:
+        new_balance = update_balance(interaction.user.id, -amount)
+        embed = discord.Embed(title="🪙 Coinflip - YOU LOST!", color=0xff4444)
+        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
+        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
+        embed.add_field(name="Lost", value=f"-{amount:,} 🪙", inline=True)
+    
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    
+    set_short_cooldown(interaction.user.id, "coinflip")
+    save_data()
+    
+    await log_action(
+        "COINFLIP",
+        f"🪙 Coinflip {'Win' if won else 'Loss'}",
+        f"{interaction.user.mention} {'won' if won else 'lost'} **{amount:,} tokens** on coinflip",
+        color=0x00ff00 if won else 0xff4444,
+        user=interaction.user,
+        fields=[
+            {"name": "Bet Amount", "value": f"{amount:,} 🪙", "inline": True},
+            {"name": "Choice", "value": choice.title(), "inline": True},
+            {"name": "Result", "value": result.title(), "inline": True}
+        ]
+    )
+    
+    await interaction.response.send_message(embed=embed)
+
+class DuelAcceptView(discord.ui.View):
+    def __init__(self, challenger_id, challenged_id, amount):
+        super().__init__(timeout=60)
+        self.challenger_id = challenger_id
+        self.challenged_id = challenged_id
+        self.amount = amount
+    
+    @discord.ui.button(label="✅ Accept Duel", style=discord.ButtonStyle.green)
+    async def accept_duel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.challenged_id:
+            await interaction.response.send_message("❌ This duel is not for you!", ephemeral=True)
+            return
+        
+        challenger_balance = get_user_balance(self.challenger_id)
+        challenged_balance = get_user_balance(self.challenged_id)
+        
+        if challenger_balance < self.amount:
+            await interaction.response.send_message("❌ The challenger no longer has enough tokens!", ephemeral=True)
+            return
+        
+        if challenged_balance < self.amount:
+            await interaction.response.send_message(f"❌ You don't have enough tokens! Need {self.amount - challenged_balance:,} more.", ephemeral=True)
+            return
+        
+        duel_key = f"{self.challenger_id}_{self.challenged_id}"
+        if duel_key in pending_duels:
+            del pending_duels[duel_key]
+        
+        winner_id = random.choice([self.challenger_id, self.challenged_id])
+        loser_id = self.challenged_id if winner_id == self.challenger_id else self.challenger_id
+        
+        update_balance(winner_id, self.amount)
+        update_balance(loser_id, -self.amount)
+        save_data()
+        
+        winner = bot.get_user(winner_id)
+        loser = bot.get_user(loser_id)
+        challenger = bot.get_user(self.challenger_id)
+        challenged = bot.get_user(self.challenged_id)
+        
+        embed = discord.Embed(title="⚔️ Duel Complete!", color=0xFFD700)
+        embed.add_field(name="Winner", value=f"🏆 {winner.mention}", inline=True)
+        embed.add_field(name="Loser", value=f"💀 {loser.mention}", inline=True)
+        embed.add_field(name="Amount", value=f"{self.amount:,} 🪙", inline=True)
+        embed.add_field(name="Winner's Balance", value=f"{get_user_balance(winner_id):,} 🪙", inline=True)
+        embed.add_field(name="Loser's Balance", value=f"{get_user_balance(loser_id):,} 🪙", inline=True)
+        embed.add_field(name="‎", value="‎", inline=True)
+        
+        embed.set_footer(text="The coin has decided!")
+        
+        await log_action(
+            "DUEL",
+            "⚔️ Duel Completed",
+            f"Duel between {challenger.mention} and {challenged.mention}",
+            color=0xFFD700,
+            user=winner,
+            fields=[
+                {"name": "Challenger", "value": challenger.mention, "inline": True},
+                {"name": "Challenged", "value": challenged.mention, "inline": True},
+                {"name": "Amount", "value": f"{self.amount:,} 🪙", "inline": True},
+                {"name": "Winner", "value": winner.mention, "inline": True}
+            ]
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+    
+    @discord.ui.button(label="❌ Decline Duel", style=discord.ButtonStyle.red)
+    async def decline_duel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.challenged_id:
+            await interaction.response.send_message("❌ This duel is not for you!", ephemeral=True)
+            return
+        
+        duel_key = f"{self.challenger_id}_{self.challenged_id}"
+        if duel_key in pending_duels:
+            del pending_duels[duel_key]
+        
+        challenger = bot.get_user(self.challenger_id)
+        embed = discord.Embed(
+            title="❌ Duel Declined", 
+            description=f"{interaction.user.mention} declined the duel challenge from {challenger.mention}.",
+            color=0xff4444
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+
+@bot.tree.command(name="duel", description="Challenge another user to a coinflip duel")
+async def duel(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not can_use_short_cooldown(interaction.user.id, "duel", 10):
+        await interaction.response.send_message("⏰ Please wait 10 seconds between duel challenges!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Duel amount must be greater than 0!", ephemeral=True)
+        return
+    
+    if user.id == interaction.user.id:
+        await interaction.response.send_message("❌ You can't duel yourself!", ephemeral=True)
+        return
+    
+    if user.bot:
+        await interaction.response.send_message("❌ You can't duel bots!", ephemeral=True)
+        return
+    
+    challenger_balance = get_user_balance(interaction.user.id)
+    if challenger_balance < amount:
+        await interaction.response.send_message(f"❌ You need **{amount - challenger_balance:,}** more tokens to make this challenge!", ephemeral=True)
+        return
+    
+    challenged_balance = get_user_balance(user.id)
+    if challenged_balance < amount:
+        await interaction.response.send_message(f"❌ {user.mention} doesn't have enough tokens for this duel! They need {amount - challenged_balance:,} more.", ephemeral=True)
+        return
+    
+    duel_key = f"{interaction.user.id}_{user.id}"
+    reverse_duel_key = f"{user.id}_{interaction.user.id}"
+    
+    if duel_key in pending_duels or reverse_duel_key in pending_duels:
+        await interaction.response.send_message("❌ There's already a pending duel between you two!", ephemeral=True)
+        return
+    
+    pending_duels[duel_key] = {
+        'challenger': interaction.user.id,
+        'challenged': user.id,
+        'amount': amount,
+        'created_at': datetime.now()
+    }
+    
+    set_short_cooldown(interaction.user.id, "duel")
+    
+    embed = discord.Embed(
+        title="⚔️ Duel Challenge!",
+        description=f"{interaction.user.mention} challenges {user.mention} to a duel!",
+        color=0xFFD700
+    )
+    
+    embed.add_field(name="💰 Stakes", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="🎯 Rules", value="Winner takes all!\nCoinflip decides the victor", inline=True)
+    embed.add_field(name="⏰ Expires", value="60 seconds", inline=True)
+    
+    embed.add_field(name="💪 Challenger Balance", value=f"{challenger_balance:,} 🪙", inline=True)
+    embed.add_field(name="🎲 Challenged Balance", value=f"{challenged_balance:,} 🪙", inline=True)
+    embed.add_field(name="‎", value="‎", inline=True)
+    
+    embed.set_footer(text=f"{user.display_name}, will you accept this challenge?")
+    
+    view = DuelAcceptView(interaction.user.id, user.id, amount)
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="gift", description="Gift tokens to another user")
+async def gift(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not can_use_short_cooldown(interaction.user.id, "gift", 3):
+        await interaction.response.send_message("⏰ Please wait 3 seconds between gifts!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    if user.id == interaction.user.id:
+        await interaction.response.send_message("❌ Can't gift to yourself!", ephemeral=True)
+        return
+    
+    if user.bot:
+        await interaction.response.send_message("❌ Can't gift to bots!", ephemeral=True)
+        return
+    
+    giver_balance = get_user_balance(interaction.user.id)
+    if giver_balance < amount:
+        await interaction.response.send_message(f"❌ Need **{amount - giver_balance:,}** more tokens!", ephemeral=True)
+        return
+    
+    update_balance(interaction.user.id, -amount)
+    update_balance(user.id, amount)
+    set_short_cooldown(interaction.user.id, "gift")
+    save_data()
+    
+    await log_action(
+        "GIFT",
+        "🎁 Token Gift",
+        f"{interaction.user.mention} gifted **{amount:,} tokens** to {user.mention}",
+        color=0xffb347,
+        user=interaction.user,
+        fields=[
+            {"name": "Giver", "value": interaction.user.mention, "inline": True},
+            {"name": "Receiver", "value": user.mention, "inline": True},
+            {"name": "Amount", "value": f"{amount:,} 🪙", "inline": True}
+        ]
+    )
+    
+    message = f"🎁 {interaction.user.mention} gifted **{amount:,} tokens** 🪙 to {user.mention}! 🎉"
+    await interaction.response.send_message(message)
+
+# Purchase confirmation view
+class PurchaseConfirmView(discord.ui.View):
+    def __init__(self, item, user_id):
+        super().__init__(timeout=60)
+        self.item = item
+        self.user_id = user_id
+    
+    @discord.ui.button(label="✅ Confirm Purchase", style=discord.ButtonStyle.green)
+    async def confirm_purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your purchase!", ephemeral=True)
+            return
+        
+        balance = get_user_balance(interaction.user.id)
         if balance < self.item['price']:
             await interaction.response.send_message(
                 f"❌ Insufficient funds! You need **{self.item['price'] - balance:,}** more tokens.",
@@ -728,643 +1367,4 @@ if __name__ == "__main__":
         sys.exit(1)
     finally:
         print("🔄 Bot shutting down...")
-        force_save_on_exit()import discord
-from discord.ext import commands
-import json
-import os
-import random
-import asyncio
-from datetime import datetime, timedelta
-import time
-import sys
-
-# Railway logging setup
-import logging
-logging.basicConfig(level=logging.INFO)
-
-print("🚀 Starting Discord Bot...")
-
-# Bot setup
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-# Configuration
-ADMIN_ROLE_ID = 1410911675351306250
-LOG_CHANNEL_ID = 1413818486404415590
-PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
-
-# Data storage
-user_data = {}
-shop_data = []
-cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
-pending_duels = {}
-
-# Work jobs and crimes
-WORK_JOBS = [
-    "delivered pizzas", "walked dogs", "cleaned houses", "tutored students",
-    "fixed computers", "painted fences", "washed cars", "mowed lawns"
-]
-
-CRIME_ACTIVITIES = [
-    "pickpocketed a stranger", "hacked a vending machine", "sneaked into a movie",
-    "stole candy from a store", "jumped a subway turnstile", "copied homework"
-]
-
-def load_data():
-    """Load all data from files"""
-    global user_data, shop_data, cooldowns
-    try:
-        if os.path.exists('user_data.json'):
-            with open('user_data.json', 'r') as f:
-                user_data = json.load(f)
-        if os.path.exists('shop_data.json'):
-            with open('shop_data.json', 'r') as f:
-                shop_data = json.load(f)
-        if os.path.exists('cooldowns.json'):
-            with open('cooldowns.json', 'r') as f:
-                cooldowns = json.load(f)
-        print("✅ Data loaded successfully")
-    except Exception as e:
-        print(f"⚠️ Error loading data: {e}")
-
-def save_data():
-    """Save all data to files"""
-    try:
-        with open('user_data.json', 'w') as f:
-            json.dump(user_data, f, indent=2)
-        with open('shop_data.json', 'w') as f:
-            json.dump(shop_data, f, indent=2)
-        with open('cooldowns.json', 'w') as f:
-            json.dump(cooldowns, f, indent=2)
-    except Exception as e:
-        print(f"⚠️ Error saving data: {e}")
-
-def force_save_on_exit():
-    """Force save data when bot shuts down"""
-    try:
-        save_data()
-        print("💾 Data saved on exit")
-    except Exception as e:
-        print(f"⚠️ Error saving on exit: {e}")
-
-async def log_action(action_type, title, description, color=0x0099ff, user=None, fields=None):
-    """Send log message to the log channel"""
-    try:
-        log_channel = bot.get_channel(LOG_CHANNEL_ID)
-        if not log_channel:
-            print(f"⚠️ Log channel {LOG_CHANNEL_ID} not found!")
-            return
-        
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=color,
-            timestamp=datetime.now()
-        )
-        
-        if user:
-            embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
-        
-        if fields:
-            for field in fields:
-                embed.add_field(
-                    name=field.get("name", "Field"),
-                    value=field.get("value", "No value"),
-                    inline=field.get("inline", True)
-                )
-        
-        embed.set_footer(text=f"Action: {action_type}")
-        await log_channel.send(embed=embed)
-        
-    except Exception as e:
-        print(f"⚠️ Error sending log: {e}")
-
-async def log_purchase(user, item_name, price, quantity=1):
-    """Log purchase to purchase log channel"""
-    try:
-        purchase_channel = bot.get_channel(PURCHASE_LOG_CHANNEL_ID)
-        if not purchase_channel:
-            print(f"⚠️ Purchase log channel {PURCHASE_LOG_CHANNEL_ID} not found!")
-            return
-        
-        embed = discord.Embed(
-            title="🛒 Purchase Made",
-            color=0x00ff00,
-            timestamp=datetime.now()
-        )
-        
-        embed.add_field(name="User", value=user.mention, inline=True)
-        embed.add_field(name="Item", value=item_name, inline=True)
-        embed.add_field(name="Quantity", value=str(quantity), inline=True)
-        embed.add_field(name="Total Cost", value=f"{price * quantity:,} 🪙", inline=True)
-        embed.add_field(name="Unit Price", value=f"{price:,} 🪙", inline=True)
-        
-        embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
-        await purchase_channel.send(embed=embed)
-        
-    except Exception as e:
-        print(f"⚠️ Error sending purchase log: {e}")
-
-def get_user_balance(user_id):
-    """Get user balance"""
-    return user_data.get(str(user_id), {}).get('balance', 0)
-
-def update_balance(user_id, amount):
-    """Update user balance"""
-    user_id = str(user_id)
-    if user_id not in user_data:
-        user_data[user_id] = {'balance': 0, 'total_earned': 0, 'total_spent': 0}
-    
-    user_data[user_id]['balance'] += amount
-    if amount > 0:
-        user_data[user_id]['total_earned'] = user_data[user_id].get('total_earned', 0) + amount
-    else:
-        user_data[user_id]['total_spent'] = user_data[user_id].get('total_spent', 0) + abs(amount)
-    
-    return user_data[user_id]['balance']
-
-def get_rank(balance):
-    """Get user rank"""
-    if balance >= 100000: return "🏆 Legendary"
-    elif balance >= 50000: return "💎 Elite"
-    elif balance >= 20000: return "🥇 VIP"
-    elif balance >= 10000: return "🥈 Premium"
-    elif balance >= 5000: return "🥉 Gold"
-    elif balance >= 1000: return "🟢 Silver"
-    else: return "🔵 Starter"
-
-def can_use_command(user_id, command_type, hours):
-    """Check if user can use command with persistent cooldowns"""
-    user_id = str(user_id)
-    if user_id not in cooldowns[command_type]:
-        return True, None
-    
-    try:
-        last_used = datetime.fromisoformat(cooldowns[command_type][user_id])
-        next_use = last_used + timedelta(hours=hours)
-        if datetime.now() >= next_use:
-            return True, None
-        return False, next_use
-    except:
-        return True, None
-
-def can_use_short_cooldown(user_id, command_type, seconds):
-    """Check short cooldowns"""
-    user_id = str(user_id)
-    if user_id not in cooldowns[command_type]:
-        return True
-    
-    try:
-        last_used = float(cooldowns[command_type][user_id])
-        if time.time() - last_used >= seconds:
-            return True
-        return False
-    except:
-        return True
-
-def set_short_cooldown(user_id, command_type):
-    """Set short cooldown using timestamp"""
-    cooldowns[command_type][str(user_id)] = str(time.time())
-
-def format_time(next_use):
-    """Format time remaining"""
-    try:
-        remaining = next_use - datetime.now()
-        hours = int(remaining.total_seconds() // 3600)
-        minutes = int((remaining.total_seconds() % 3600) // 60)
-        if hours > 0:
-            return f"{hours}h {minutes}m"
-        return f"{minutes}m"
-    except:
-        return "soon"
-
-def is_admin(user):
-    """Check if user is admin"""
-    return any(role.id == ADMIN_ROLE_ID for role in user.roles)
-
-# Auto-save task
-async def auto_save():
-    """Auto save every 30 seconds"""
-    while True:
-        await asyncio.sleep(30)
-        save_data()
-
-# Clean up expired duels
-async def cleanup_expired_duels():
-    """Clean up expired duel challenges"""
-    while True:
-        await asyncio.sleep(300)  # 5 minutes
-        current_time = datetime.now()
-        expired_duels = []
-        
-        for duel_key, duel_data in pending_duels.items():
-            try:
-                created_at = duel_data['created_at']
-                if (current_time - created_at).total_seconds() > 300:
-                    expired_duels.append(duel_key)
-            except:
-                expired_duels.append(duel_key)
-        
-        for expired_key in expired_duels:
-            del pending_duels[expired_key]
-
-@bot.event
-async def on_ready():
-    print(f'🚀 {bot.user} is online!')
-    load_data()
-    
-    # Start background tasks
-    asyncio.create_task(auto_save())
-    asyncio.create_task(cleanup_expired_duels())
-    
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} commands")
-    except Exception as e:
-        print(f"❌ Failed to sync: {e}")
-
-@bot.event
-async def on_message(message):
-    if not message.author.bot and message.guild:
-        tokens = random.randint(1, 5)
-        update_balance(message.author.id, tokens)
-    await bot.process_commands(message)
-
-@bot.tree.command(name="balance", description="Check your token balance")
-async def balance(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    balance = get_user_balance(interaction.user.id)
-    data = user_data.get(user_id, {})
-    earned = data.get('total_earned', 0)
-    spent = data.get('total_spent', 0)
-    rank = get_rank(balance)
-    
-    embed = discord.Embed(
-        title="💰 Token Wallet",
-        color=0x7B68EE,
-        timestamp=datetime.now()
-    )
-    
-    embed.add_field(name="Current Balance", value=f"**{balance:,}** 🪙", inline=True)
-    embed.add_field(name="Rank", value=rank, inline=True)
-    embed.add_field(name="Total Spent", value=f"{spent:,} 🪙", inline=True)
-    embed.add_field(name="Total Earned", value=f"{earned:,} 🪙", inline=True)
-    embed.add_field(name="‎", value="‎", inline=True)
-    embed.add_field(name="‎", value="‎", inline=True)
-    
-    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    embed.set_footer(text="💬 Chat to earn 1-5 tokens per message")
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="daily", description="Claim daily tokens (24h cooldown)")
-async def daily(interaction: discord.Interaction):
-    can_use, next_use = can_use_command(interaction.user.id, "daily", 24)
-    
-    if not can_use:
-        time_left = format_time(next_use)
-        await interaction.response.send_message(f"⏰ Daily already claimed! Come back in **{time_left}**", ephemeral=True)
-        return
-    
-    tokens = random.randint(50, 200)
-    new_balance = update_balance(interaction.user.id, tokens)
-    cooldowns["daily"][str(interaction.user.id)] = datetime.now().isoformat()
-    save_data()
-    
-    embed = discord.Embed(title="🎁 Daily Reward!", color=0x00ff00)
-    embed.add_field(name="Earned", value=f"{tokens:,} 🪙", inline=True)
-    embed.add_field(name="Balance", value=f"{new_balance:,} 🪙", inline=True)
-    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="work", description="Work for tokens (3h cooldown)")
-async def work(interaction: discord.Interaction):
-    can_use, next_use = can_use_command(interaction.user.id, "work", 3)
-    
-    if not can_use:
-        time_left = format_time(next_use)
-        await interaction.response.send_message(f"💼 Still tired! Rest for **{time_left}** more", ephemeral=True)
-        return
-    
-    tokens = random.randint(50, 300)
-    job = random.choice(WORK_JOBS)
-    new_balance = update_balance(interaction.user.id, tokens)
-    cooldowns["work"][str(interaction.user.id)] = datetime.now().isoformat()
-    save_data()
-    
-    embed = discord.Embed(title="💼 Work Complete!", color=0x4CAF50)
-    embed.add_field(name="Job", value=f"You {job}", inline=False)
-    embed.add_field(name="Earned", value=f"{tokens:,} 🪙", inline=True)
-    embed.add_field(name="Balance", value=f"{new_balance:,} 🪙", inline=True)
-    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="crime", description="Commit crime for tokens (1h cooldown, risky!)")
-async def crime(interaction: discord.Interaction):
-    can_use, next_use = can_use_command(interaction.user.id, "crime", 1)
-    
-    if not can_use:
-        time_left = format_time(next_use)
-        await interaction.response.send_message(f"🚔 Lay low for **{time_left}** more!", ephemeral=True)
-        return
-    
-    success = random.choice([True, False])
-    activity = random.choice(CRIME_ACTIVITIES)
-    
-    if success:
-        tokens = random.randint(75, 400)
-        new_balance = update_balance(interaction.user.id, tokens)
-        embed = discord.Embed(title="🎭 Crime Success!", color=0x00ff00)
-        embed.add_field(name="Crime", value=f"You {activity}", inline=False)
-        embed.add_field(name="Gained", value=f"+{tokens:,} 🪙", inline=True)
-    else:
-        tokens = random.randint(25, 200)
-        current = get_user_balance(interaction.user.id)
-        tokens = min(tokens, current)
-        new_balance = update_balance(interaction.user.id, -tokens)
-        embed = discord.Embed(title="🚔 Crime Failed!", color=0xff4444)
-        embed.add_field(name="Crime", value=f"Tried to {activity}", inline=False)
-        embed.add_field(name="Lost", value=f"-{tokens:,} 🪙", inline=True)
-    
-    embed.add_field(name="Balance", value=f"{new_balance:,} 🪙", inline=True)
-    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    
-    cooldowns["crime"][str(interaction.user.id)] = datetime.now().isoformat()
-    save_data()
-    
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-@bot.tree.command(name="coinflip", description="Bet tokens on a coinflip")
-async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
-    if not can_use_short_cooldown(interaction.user.id, "coinflip", 5):
-        await interaction.response.send_message("⏰ Please wait 5 seconds between coinflips!", ephemeral=True)
-        return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Bet amount must be greater than 0!", ephemeral=True)
-        return
-    
-    choice = choice.lower()
-    if choice not in ['heads', 'tails', 'h', 't']:
-        await interaction.response.send_message("❌ Choose 'heads' or 'tails' (or 'h'/'t')!", ephemeral=True)
-        return
-    
-    if choice in ['h', 'heads']:
-        choice = 'heads'
-    else:
-        choice = 'tails'
-    
-    balance = get_user_balance(interaction.user.id)
-    if balance < amount:
-        await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
-        return
-    
-    result = random.choice(['heads', 'tails'])
-    won = choice == result
-    
-    if won:
-        winnings = amount
-        new_balance = update_balance(interaction.user.id, winnings)
-        embed = discord.Embed(title="🪙 Coinflip - YOU WON!", color=0x00ff00)
-        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
-        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
-        embed.add_field(name="Winnings", value=f"+{winnings:,} 🪙", inline=True)
-    else:
-        new_balance = update_balance(interaction.user.id, -amount)
-        embed = discord.Embed(title="🪙 Coinflip - YOU LOST!", color=0xff4444)
-        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
-        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
-        embed.add_field(name="Lost", value=f"-{amount:,} 🪙", inline=True)
-    
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
-    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    
-    set_short_cooldown(interaction.user.id, "coinflip")
-    save_data()
-    
-    await log_action(
-        "COINFLIP",
-        f"🪙 Coinflip {'Win' if won else 'Loss'}",
-        f"{interaction.user.mention} {'won' if won else 'lost'} **{amount:,} tokens** on coinflip",
-        color=0x00ff00 if won else 0xff4444,
-        user=interaction.user,
-        fields=[
-            {"name": "Bet Amount", "value": f"{amount:,} 🪙", "inline": True},
-            {"name": "Choice", "value": choice.title(), "inline": True},
-            {"name": "Result", "value": result.title(), "inline": True}
-        ]
-    )
-    
-    await interaction.response.send_message(embed=embed)
-
-class DuelAcceptView(discord.ui.View):
-    def __init__(self, challenger_id, challenged_id, amount):
-        super().__init__(timeout=60)
-        self.challenger_id = challenger_id
-        self.challenged_id = challenged_id
-        self.amount = amount
-    
-    @discord.ui.button(label="✅ Accept Duel", style=discord.ButtonStyle.green)
-    async def accept_duel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.challenged_id:
-            await interaction.response.send_message("❌ This duel is not for you!", ephemeral=True)
-            return
-        
-        challenger_balance = get_user_balance(self.challenger_id)
-        challenged_balance = get_user_balance(self.challenged_id)
-        
-        if challenger_balance < self.amount:
-            await interaction.response.send_message("❌ The challenger no longer has enough tokens!", ephemeral=True)
-            return
-        
-        if challenged_balance < self.amount:
-            await interaction.response.send_message(f"❌ You don't have enough tokens! Need {self.amount - challenged_balance:,} more.", ephemeral=True)
-            return
-        
-        duel_key = f"{self.challenger_id}_{self.challenged_id}"
-        if duel_key in pending_duels:
-            del pending_duels[duel_key]
-        
-        winner_id = random.choice([self.challenger_id, self.challenged_id])
-        loser_id = self.challenged_id if winner_id == self.challenger_id else self.challenger_id
-        
-        update_balance(winner_id, self.amount)
-        update_balance(loser_id, -self.amount)
-        save_data()
-        
-        winner = bot.get_user(winner_id)
-        loser = bot.get_user(loser_id)
-        challenger = bot.get_user(self.challenger_id)
-        challenged = bot.get_user(self.challenged_id)
-        
-        embed = discord.Embed(title="⚔️ Duel Complete!", color=0xFFD700)
-        embed.add_field(name="Winner", value=f"🏆 {winner.mention}", inline=True)
-        embed.add_field(name="Loser", value=f"💀 {loser.mention}", inline=True)
-        embed.add_field(name="Amount", value=f"{self.amount:,} 🪙", inline=True)
-        embed.add_field(name="Winner's Balance", value=f"{get_user_balance(winner_id):,} 🪙", inline=True)
-        embed.add_field(name="Loser's Balance", value=f"{get_user_balance(loser_id):,} 🪙", inline=True)
-        embed.add_field(name="‎", value="‎", inline=True)
-        
-        embed.set_footer(text="The coin has decided!")
-        
-        await log_action(
-            "DUEL",
-            "⚔️ Duel Completed",
-            f"Duel between {challenger.mention} and {challenged.mention}",
-            color=0xFFD700,
-            user=winner,
-            fields=[
-                {"name": "Challenger", "value": challenger.mention, "inline": True},
-                {"name": "Challenged", "value": challenged.mention, "inline": True},
-                {"name": "Amount", "value": f"{self.amount:,} 🪙", "inline": True},
-                {"name": "Winner", "value": winner.mention, "inline": True}
-            ]
-        )
-        
-        await interaction.response.edit_message(embed=embed, view=None)
-    
-    @discord.ui.button(label="❌ Decline Duel", style=discord.ButtonStyle.red)
-    async def decline_duel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.challenged_id:
-            await interaction.response.send_message("❌ This duel is not for you!", ephemeral=True)
-            return
-        
-        duel_key = f"{self.challenger_id}_{self.challenged_id}"
-        if duel_key in pending_duels:
-            del pending_duels[duel_key]
-        
-        challenger = bot.get_user(self.challenger_id)
-        embed = discord.Embed(
-            title="❌ Duel Declined", 
-            description=f"{interaction.user.mention} declined the duel challenge from {challenger.mention}.",
-            color=0xff4444
-        )
-        
-        await interaction.response.edit_message(embed=embed, view=None)
-
-@bot.tree.command(name="duel", description="Challenge another user to a coinflip duel")
-async def duel(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not can_use_short_cooldown(interaction.user.id, "duel", 10):
-        await interaction.response.send_message("⏰ Please wait 10 seconds between duel challenges!", ephemeral=True)
-        return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Duel amount must be greater than 0!", ephemeral=True)
-        return
-    
-    if user.id == interaction.user.id:
-        await interaction.response.send_message("❌ You can't duel yourself!", ephemeral=True)
-        return
-    
-    if user.bot:
-        await interaction.response.send_message("❌ You can't duel bots!", ephemeral=True)
-        return
-    
-    challenger_balance = get_user_balance(interaction.user.id)
-    if challenger_balance < amount:
-        await interaction.response.send_message(f"❌ You need **{amount - challenger_balance:,}** more tokens to make this challenge!", ephemeral=True)
-        return
-    
-    challenged_balance = get_user_balance(user.id)
-    if challenged_balance < amount:
-        await interaction.response.send_message(f"❌ {user.mention} doesn't have enough tokens for this duel! They need {amount - challenged_balance:,} more.", ephemeral=True)
-        return
-    
-    duel_key = f"{interaction.user.id}_{user.id}"
-    reverse_duel_key = f"{user.id}_{interaction.user.id}"
-    
-    if duel_key in pending_duels or reverse_duel_key in pending_duels:
-        await interaction.response.send_message("❌ There's already a pending duel between you two!", ephemeral=True)
-        return
-    
-    pending_duels[duel_key] = {
-        'challenger': interaction.user.id,
-        'challenged': user.id,
-        'amount': amount,
-        'created_at': datetime.now()
-    }
-    
-    set_short_cooldown(interaction.user.id, "duel")
-    
-    embed = discord.Embed(
-        title="⚔️ Duel Challenge!",
-        description=f"{interaction.user.mention} challenges {user.mention} to a duel!",
-        color=0xFFD700
-    )
-    
-    embed.add_field(name="💰 Stakes", value=f"{amount:,} 🪙", inline=True)
-    embed.add_field(name="🎯 Rules", value="Winner takes all!\nCoinflip decides the victor", inline=True)
-    embed.add_field(name="⏰ Expires", value="60 seconds", inline=True)
-    
-    embed.add_field(name="💪 Challenger Balance", value=f"{challenger_balance:,} 🪙", inline=True)
-    embed.add_field(name="🎲 Challenged Balance", value=f"{challenged_balance:,} 🪙", inline=True)
-    embed.add_field(name="‎", value="‎", inline=True)
-    
-    embed.set_footer(text=f"{user.display_name}, will you accept this challenge?")
-    
-    view = DuelAcceptView(interaction.user.id, user.id, amount)
-    await interaction.response.send_message(embed=embed, view=view)
-
-@bot.tree.command(name="gift", description="Gift tokens to another user")
-async def gift(interaction: discord.Interaction, user: discord.Member, amount: int):
-    if not can_use_short_cooldown(interaction.user.id, "gift", 3):
-        await interaction.response.send_message("⏰ Please wait 3 seconds between gifts!", ephemeral=True)
-        return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
-        return
-    
-    if user.id == interaction.user.id:
-        await interaction.response.send_message("❌ Can't gift to yourself!", ephemeral=True)
-        return
-    
-    if user.bot:
-        await interaction.response.send_message("❌ Can't gift to bots!", ephemeral=True)
-        return
-    
-    giver_balance = get_user_balance(interaction.user.id)
-    if giver_balance < amount:
-        await interaction.response.send_message(f"❌ Need **{amount - giver_balance:,}** more tokens!", ephemeral=True)
-        return
-    
-    update_balance(interaction.user.id, -amount)
-    update_balance(user.id, amount)
-    set_short_cooldown(interaction.user.id, "gift")
-    save_data()
-    
-    await log_action(
-        "GIFT",
-        "🎁 Token Gift",
-        f"{interaction.user.mention} gifted **{amount:,} tokens** to {user.mention}",
-        color=0xffb347,
-        user=interaction.user,
-        fields=[
-            {"name": "Giver", "value": interaction.user.mention, "inline": True},
-            {"name": "Receiver", "value": user.mention, "inline": True},
-            {"name": "Amount", "value": f"{amount:,} 🪙", "inline": True}
-        ]
-    )
-    
-    message = f"🎁 {interaction.user.mention} gifted **{amount:,} tokens** 🪙 to {user.mention}! 🎉"
-    await interaction.response.send_message(message)
-
-# Purchase confirmation view
-class PurchaseConfirmView(discord.ui.View):
-    def __init__(self, item, user_id):
-        super().__init__(timeout=60)
-        self.item = item
-        self.user_id = user_id
-    
-    @discord.ui.button(label="✅ Confirm Purchase", style=discord.ButtonStyle.green)
-    async def confirm_purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This is not your purchase!", ephemeral=True)
-            return
-        
-        balance = get_user_balance(
+        force_save_on_exit()
