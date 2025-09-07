@@ -22,7 +22,8 @@ PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
 # Data storage
 user_data = {}
 shop_data = []
-cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}}
+cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
+pending_duels = {}  # Store pending duel challenges
 
 # Work jobs and crimes
 WORK_JOBS = [
@@ -63,6 +64,14 @@ def save_data():
             json.dump(cooldowns, f, indent=2)
     except Exception as e:
         print(f"⚠️ Error saving data: {e}")
+
+def force_save_on_exit():
+    """Force save data when bot shuts down"""
+    try:
+        save_data()
+        print("💾 Data saved on exit")
+    except Exception as e:
+        print(f"⚠️ Error saving on exit: {e}")
 
 async def log_action(action_type, title, description, color=0x0099ff, user=None, fields=None):
     """Send log message to the log channel"""
@@ -332,6 +341,243 @@ async def crime(interaction: discord.Interaction):
     save_data()
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="coinflip", description="Bet tokens on a coinflip")
+async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
+    # Check 5 second cooldown
+    if not can_use_short_cooldown(interaction.user.id, "coinflip", 5):
+        await interaction.response.send_message("⏰ Please wait 5 seconds between coinflips!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Bet amount must be greater than 0!", ephemeral=True)
+        return
+    
+    choice = choice.lower()
+    if choice not in ['heads', 'tails', 'h', 't']:
+        await interaction.response.send_message("❌ Choose 'heads' or 'tails' (or 'h'/'t')!", ephemeral=True)
+        return
+    
+    # Normalize choice
+    if choice in ['h', 'heads']:
+        choice = 'heads'
+    else:
+        choice = 'tails'
+    
+    balance = get_user_balance(interaction.user.id)
+    if balance < amount:
+        await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
+        return
+    
+    # Flip the coin
+    result = random.choice(['heads', 'tails'])
+    won = choice == result
+    
+    if won:
+        winnings = amount  # Win back your bet + same amount as profit
+        new_balance = update_balance(interaction.user.id, winnings)
+        embed = discord.Embed(title="🪙 Coinflip - YOU WON!", color=0x00ff00)
+        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
+        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
+        embed.add_field(name="Winnings", value=f"+{winnings:,} 🪙", inline=True)
+    else:
+        new_balance = update_balance(interaction.user.id, -amount)
+        embed = discord.Embed(title="🪙 Coinflip - YOU LOST!", color=0xff4444)
+        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
+        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
+        embed.add_field(name="Lost", value=f"-{amount:,} 🪙", inline=True)
+    
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    
+    set_short_cooldown(interaction.user.id, "coinflip")
+    save_data()
+    
+    # Log gambling activity
+    await log_action(
+        "COINFLIP",
+        f"🪙 Coinflip {'Win' if won else 'Loss'}",
+        f"{interaction.user.mention} {'won' if won else 'lost'} **{amount:,} tokens** on coinflip",
+        color=0x00ff00 if won else 0xff4444,
+        user=interaction.user,
+        fields=[
+            {"name": "Bet Amount", "value": f"{amount:,} 🪙", "inline": True},
+            {"name": "Choice", "value": choice.title(), "inline": True},
+            {"name": "Result", "value": result.title(), "inline": True},
+            {"name": "Outcome", "value": f"{'Won' if won else 'Lost'} {amount:,} 🪙", "inline": True}
+        ]
+    )
+    
+    await interaction.response.send_message(embed=embed)
+
+# Duel acceptance view
+class DuelAcceptView(discord.ui.View):
+    def __init__(self, challenger_id, challenged_id, amount):
+        super().__init__(timeout=60)
+        self.challenger_id = challenger_id
+        self.challenged_id = challenged_id
+        self.amount = amount
+    
+    @discord.ui.button(label="✅ Accept Duel", style=discord.ButtonStyle.green)
+    async def accept_duel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.challenged_id:
+            await interaction.response.send_message("❌ This duel is not for you!", ephemeral=True)
+            return
+        
+        # Check if both users still have enough tokens
+        challenger_balance = get_user_balance(self.challenger_id)
+        challenged_balance = get_user_balance(self.challenged_id)
+        
+        if challenger_balance < self.amount:
+            await interaction.response.send_message(f"❌ The challenger no longer has enough tokens!", ephemeral=True)
+            return
+        
+        if challenged_balance < self.amount:
+            await interaction.response.send_message(f"❌ You don't have enough tokens! Need {self.amount - challenged_balance:,} more.", ephemeral=True)
+            return
+        
+        # Remove from pending duels
+        duel_key = f"{self.challenger_id}_{self.challenged_id}"
+        if duel_key in pending_duels:
+            del pending_duels[duel_key]
+        
+        # Execute the duel
+        winner_id = random.choice([self.challenger_id, self.challenged_id])
+        loser_id = self.challenged_id if winner_id == self.challenger_id else self.challenger_id
+        
+        # Transfer tokens
+        update_balance(winner_id, self.amount)
+        update_balance(loser_id, -self.amount)
+        save_data()
+        
+        # Get user objects
+        winner = bot.get_user(winner_id)
+        loser = bot.get_user(loser_id)
+        challenger = bot.get_user(self.challenger_id)
+        challenged = bot.get_user(self.challenged_id)
+        
+        embed = discord.Embed(title="⚔️ Duel Complete!", color=0xFFD700)
+        embed.add_field(name="Winner", value=f"🏆 {winner.mention}", inline=True)
+        embed.add_field(name="Loser", value=f"💀 {loser.mention}", inline=True)
+        embed.add_field(name="Amount", value=f"{self.amount:,} 🪙", inline=True)
+        embed.add_field(name="Winner's Balance", value=f"{get_user_balance(winner_id):,} 🪙", inline=True)
+        embed.add_field(name="Loser's Balance", value=f"{get_user_balance(loser_id):,} 🪙", inline=True)
+        embed.add_field(name="‎", value="‎", inline=True)
+        
+        embed.set_footer(text="The coin has decided!")
+        
+        # Log the duel
+        await log_action(
+            "DUEL",
+            "⚔️ Duel Completed",
+            f"Duel between {challenger.mention} and {challenged.mention}",
+            color=0xFFD700,
+            user=winner,
+            fields=[
+                {"name": "Challenger", "value": challenger.mention, "inline": True},
+                {"name": "Challenged", "value": challenged.mention, "inline": True},
+                {"name": "Amount", "value": f"{self.amount:,} 🪙", "inline": True},
+                {"name": "Winner", "value": winner.mention, "inline": True}
+            ]
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+    
+    @discord.ui.button(label="❌ Decline Duel", style=discord.ButtonStyle.red)
+    async def decline_duel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.challenged_id:
+            await interaction.response.send_message("❌ This duel is not for you!", ephemeral=True)
+            return
+        
+        # Remove from pending duels
+        duel_key = f"{self.challenger_id}_{self.challenged_id}"
+        if duel_key in pending_duels:
+            del pending_duels[duel_key]
+        
+        challenger = bot.get_user(self.challenger_id)
+        embed = discord.Embed(
+            title="❌ Duel Declined", 
+            description=f"{interaction.user.mention} declined the duel challenge from {challenger.mention}.",
+            color=0xff4444
+        )
+        
+        await interaction.response.edit_message(embed=embed, view=None)
+
+@bot.tree.command(name="duel", description="Challenge another user to a coinflip duel")
+async def duel(interaction: discord.Interaction, user: discord.Member, amount: int):
+    # Check 10 second cooldown
+    if not can_use_short_cooldown(interaction.user.id, "duel", 10):
+        await interaction.response.send_message("⏰ Please wait 10 seconds between duel challenges!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Duel amount must be greater than 0!", ephemeral=True)
+        return
+    
+    if user.id == interaction.user.id:
+        await interaction.response.send_message("❌ You can't duel yourself!", ephemeral=True)
+        return
+    
+    if user.bot:
+        await interaction.response.send_message("❌ You can't duel bots!", ephemeral=True)
+        return
+    
+    # Check if challenger has enough tokens
+    challenger_balance = get_user_balance(interaction.user.id)
+    if challenger_balance < amount:
+        await interaction.response.send_message(f"❌ You need **{amount - challenger_balance:,}** more tokens to make this challenge!", ephemeral=True)
+        return
+    
+    # Check if challenged user has enough tokens
+    challenged_balance = get_user_balance(user.id)
+    if challenged_balance < amount:
+        await interaction.response.send_message(f"❌ {user.mention} doesn't have enough tokens for this duel! They need {amount - challenged_balance:,} more.", ephemeral=True)
+        return
+    
+    # Check if there's already a pending duel between these users
+    duel_key = f"{interaction.user.id}_{user.id}"
+    reverse_duel_key = f"{user.id}_{interaction.user.id}"
+    
+    if duel_key in pending_duels or reverse_duel_key in pending_duels:
+        await interaction.response.send_message("❌ There's already a pending duel between you two!", ephemeral=True)
+        return
+    
+    # Add to pending duels
+    pending_duels[duel_key] = {
+        'challenger': interaction.user.id,
+        'challenged': user.id,
+        'amount': amount,
+        'created_at': datetime.now()
+    }
+    
+    set_short_cooldown(interaction.user.id, "duel")
+    
+    embed = discord.Embed(
+        title="⚔️ Duel Challenge!",
+        description=f"{interaction.user.mention} challenges {user.mention} to a duel!",
+        color=0xFFD700
+    )
+    
+    embed.add_field(name="💰 Stakes", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="🎯 Rules", value="Winner takes all!\nCoinflip decides the victor", inline=True)
+    embed.add_field(name="⏰ Expires", value="60 seconds", inline=True)
+    
+    embed.add_field(
+        name="💪 Challenger Balance", 
+        value=f"{challenger_balance:,} 🪙", 
+        inline=True
+    )
+    embed.add_field(
+        name="🎲 Challenged Balance", 
+        value=f"{challenged_balance:,} 🪙", 
+        inline=True
+    )
+    embed.add_field(name="‎", value="‎", inline=True)
+    
+    embed.set_footer(text=f"{user.display_name}, will you accept this challenge?")
+    
+    view = DuelAcceptView(interaction.user.id, user.id, amount)
+    await interaction.response.send_message(embed=embed, view=view)
 
 @bot.tree.command(name="gift", description="Gift tokens to another user")
 async def gift(interaction: discord.Interaction, user: discord.Member, amount: int):
@@ -850,7 +1096,7 @@ async def resetdata(interaction: discord.Interaction, confirmation_code: str):
             # Reset all data
             global user_data, cooldowns
             user_data.clear()
-            cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}}
+            cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
             save_data()
             
             success_embed = discord.Embed(
@@ -1013,116 +1259,3 @@ async def addshop(interaction: discord.Interaction):
         embed.add_field(name="🛒 Current Items", value=items_list, inline=False)
     else:
         embed.add_field(name="🛒 Current Items", value="*No items in shop*", inline=False)
-    
-    embed.add_field(
-        name="🔧 Available Actions",
-        value="• **Add Item** - Create new shop items\n• **Update Item** - Modify existing items\n• **Delete Item** - Remove items from shop",
-        inline=False
-    )
-    
-    embed.set_footer(text="Use the buttons below to manage the shop")
-    
-    view = ShopManageView()
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
-
-@bot.command(name="about")
-async def about(ctx):
-    """Traditional text command for bot info"""
-    embed = discord.Embed(
-        title="🤖 Bot Commands Guide",
-        description="Here are all the commands you can use to earn and spend tokens!",
-        color=0x7B68EE,
-        timestamp=datetime.now()
-    )
-    
-    # Economy Commands
-    embed.add_field(
-        name="💰 Economy Commands",
-        value=(
-            "`/balance` - Check your token balance and stats\n"
-            "`/daily` - Claim daily tokens (24h cooldown)\n"
-            "`/work` - Work for tokens (3h cooldown)\n"
-            "`/crime` - Risky crime for tokens (1h cooldown)\n"
-            "`/coinflip <amount> <heads/tails>` - Bet tokens on coinflip\n"
-            "`/duel <user> <amount>` - Challenge someone to coinflip\n"
-            "`/gift <user> <amount>` - Gift tokens to another user"
-        ),
-        inline=False
-    )
-    
-    # Shop Commands
-    embed.add_field(
-        name="🛒 Shop Commands",
-        value=(
-            "`/shop` - Browse available items for purchase\n"
-            "`/buy <item_name> [quantity]` - Buy items from the shop"
-        ),
-        inline=False
-    )
-    
-    # Info Commands
-    embed.add_field(
-        name="📊 Information Commands",
-        value=(
-            "`/leaderboard [page]` - View top token holders\n"
-            "`!about` - Show this help message"
-        ),
-        inline=False
-    )
-    
-    # Token Earning Info
-    embed.add_field(
-        name="💬 Passive Earning",
-        value="You earn **1-5 tokens** automatically for each message you send in the server!",
-        inline=False
-    )
-    
-    # Rank System
-    embed.add_field(
-        name="🏆 Rank System",
-        value=(
-            "🔵 **Starter** - 0+ tokens\n"
-            "🟢 **Silver** - 1,000+ tokens\n"
-            "🥉 **Gold** - 5,000+ tokens\n"
-            "🥈 **Premium** - 10,000+ tokens\n"
-            "🥇 **VIP** - 20,000+ tokens\n"
-            "💎 **Elite** - 50,000+ tokens\n"
-            "🏆 **Legendary** - 100,000+ tokens"
-        ),
-        inline=False
-    )
-    
-    # Tips
-    embed.add_field(
-        name="💡 Tips",
-        value=(
-            "• Use `/daily` every 24 hours for free tokens\n"
-            "• `/work` is safe but has a 3-hour cooldown\n"
-            "• `/crime` is risky but can give more tokens\n"
-            "• Chat regularly to earn passive tokens\n"
-            "• Check `/leaderboard` to see your ranking"
-        ),
-        inline=False
-    )
-    
-    embed.set_footer(text="Need help? Ask an admin!")
-    embed.set_thumbnail(url=bot.user.display_avatar.url)
-    
-    await ctx.send(embed=embed)
-
-# Run the bot with enhanced error handling
-if __name__ == "__main__":
-    TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-    if not TOKEN:
-        print("❌ No DISCORD_BOT_TOKEN found!")
-    else:
-        try:
-            print("🚀 Starting bot...")
-            bot.run(TOKEN)
-        except KeyboardInterrupt:
-            print("\n🛑 Bot stopped by user")
-        except Exception as e:
-            print(f"❌ Bot error: {e}")
-        finally:
-            print("🔄 Bot shutting down...")
-            force_save_on_exit()
