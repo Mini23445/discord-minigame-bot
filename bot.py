@@ -1025,6 +1025,89 @@ async def addshop(interaction: discord.Interaction):
     view = ShopManageView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+@bot.command(name="info")
+async def info(ctx):
+    """Traditional text command for bot info"""
+    embed = discord.Embed(
+        title="🤖 Bot Commands Guide",
+        description="Here are all the commands you can use to earn and spend tokens!",
+        color=0x7B68EE,
+        timestamp=datetime.now()
+    )
+    
+    # Economy Commands
+    embed.add_field(
+        name="💰 Economy Commands",
+        value=(
+            "`/balance` - Check your token balance and stats\n"
+            "`/daily` - Claim daily tokens (24h cooldown)\n"
+            "`/work` - Work for tokens (3h cooldown)\n"
+            "`/crime` - Risky crime for tokens (1h cooldown)\n"
+            "`/gift <user> <amount>` - Gift tokens to another user"
+        ),
+        inline=False
+    )
+    
+    # Shop Commands
+    embed.add_field(
+        name="🛒 Shop Commands",
+        value=(
+            "`/shop` - Browse available items for purchase\n"
+            "`/buy <item_name> [quantity]` - Buy items from the shop"
+        ),
+        inline=False
+    )
+    
+    # Info Commands
+    embed.add_field(
+        name="📊 Information Commands",
+        value=(
+            "`/leaderboard [page]` - View top token holders\n"
+            "`!info` - Show this help message"
+        ),
+        inline=False
+    )
+    
+    # Token Earning Info
+    embed.add_field(
+        name="💬 Passive Earning",
+        value="You earn **1-5 tokens** automatically for each message you send in the server!",
+        inline=False
+    )
+    
+    # Rank System
+    embed.add_field(
+        name="🏆 Rank System",
+        value=(
+            "🔵 **Starter** - 0+ tokens\n"
+            "🟢 **Silver** - 1,000+ tokens\n"
+            "🥉 **Gold** - 5,000+ tokens\n"
+            "🥈 **Premium** - 10,000+ tokens\n"
+            "🥇 **VIP** - 20,000+ tokens\n"
+            "💎 **Elite** - 50,000+ tokens\n"
+            "🏆 **Legendary** - 100,000+ tokens"
+        ),
+        inline=False
+    )
+    
+    # Tips
+    embed.add_field(
+        name="💡 Tips",
+        value=(
+            "• Use `/daily` every 24 hours for free tokens\n"
+            "• `/work` is safe but has a 3-hour cooldown\n"
+            "• `/crime` is risky but can give more tokens\n"
+            "• Chat regularly to earn passive tokens\n"
+            "• Check `/leaderboard` to see your ranking"
+        ),
+        inline=False
+    )
+    
+    embed.set_footer(text="Need help? Ask an admin!")
+    embed.set_thumbnail(url=bot.user.display_avatar.url)
+    
+    await ctx.send(embed=embed)
+
 # Run the bot with enhanced error handling
 if __name__ == "__main__":
     TOKEN = os.getenv('DISCORD_BOT_TOKEN')
