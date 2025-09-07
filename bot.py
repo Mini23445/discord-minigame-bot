@@ -1025,8 +1025,8 @@ async def addshop(interaction: discord.Interaction):
     view = ShopManageView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-@bot.command(name="info")
-async def info(ctx):
+@bot.command(name="about")
+async def about(ctx):
     """Traditional text command for bot info"""
     embed = discord.Embed(
         title="🤖 Bot Commands Guide",
@@ -1063,7 +1063,7 @@ async def info(ctx):
         name="📊 Information Commands",
         value=(
             "`/leaderboard [page]` - View top token holders\n"
-            "`!info` - Show this help message"
+            "`!about` - Show this help message"
         ),
         inline=False
     )
