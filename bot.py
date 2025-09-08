@@ -299,7 +299,7 @@ async def daily(interaction: discord.Interaction):
         await interaction.response.send_message(f"⏰ Daily already claimed! Come back in **{time_left}**", ephemeral=True)
         return
     
-    tokens = random.randint(50, 200)
+    tokens = random.randint(1, 50)
     new_balance = update_balance(interaction.user.id, tokens)
     cooldowns["daily"][str(interaction.user.id)] = datetime.now().isoformat()
     save_data()
@@ -320,7 +320,7 @@ async def work(interaction: discord.Interaction):
         await interaction.response.send_message(f"💼 Still tired! Rest for **{time_left}** more", ephemeral=True)
         return
     
-    tokens = random.randint(50, 300)
+    tokens = random.randint(1, 100)
     job = random.choice(WORK_JOBS)
     new_balance = update_balance(interaction.user.id, tokens)
     cooldowns["work"][str(interaction.user.id)] = datetime.now().isoformat()
@@ -347,13 +347,13 @@ async def crime(interaction: discord.Interaction):
     activity = random.choice(CRIME_ACTIVITIES)
     
     if success:
-        tokens = random.randint(75, 400)
+        tokens = random.randint(1, 100)
         new_balance = update_balance(interaction.user.id, tokens)
         embed = discord.Embed(title="🎭 Crime Success!", color=0x00ff00)
         embed.add_field(name="Crime", value=f"You {activity}", inline=False)
         embed.add_field(name="Gained", value=f"+{tokens:,} 🪙", inline=True)
     else:
-        tokens = random.randint(25, 200)
+        tokens = random.randint(1, 200)
         current = get_user_balance(interaction.user.id)
         tokens = min(tokens, current)
         new_balance = update_balance(interaction.user.id, -tokens)
