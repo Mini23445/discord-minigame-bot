@@ -32,15 +32,60 @@ shop_data = []
 cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
 pending_duels = {}
 
-# Work jobs and crimes
 WORK_JOBS = [
-    "delivered pizzas", "walked dogs", "cleaned houses", "tutored students",
-    "fixed computers", "painted fences", "washed cars", "mowed lawns"
+    # Retail/Supermarket
+    "worked as a cashier at the supermarket", "stocked shelves at the grocery store", "bagged groceries for customers",
+    "worked the deli counter", "organized the produce section", "cleaned shopping carts", "collected carts from the parking lot",
+    "worked customer service desk", "restocked the dairy section", "faced products on shelves", "worked the bakery counter",
+    "unloaded delivery trucks", "worked overnight stocking shift", "operated the floor buffer", "cleaned the break room",
+    "worked at Target", "worked at Walmart", "worked at Best Buy", "worked at Home Depot", "worked at CVS pharmacy",
+    
+    # Fast Food/Restaurant
+    "worked the drive-thru window", "flipped burgers at McDonald's", "worked the fryer at KFC", "prepped vegetables at Subway",
+    "worked as a server at Applebee's", "bussed tables at Olive Garden", "worked as a host at Chili's", "cleaned the kitchen at Taco Bell",
+    "worked the pizza oven", "delivered pizzas", "worked at Starbucks", "worked at Dunkin Donuts", "made sandwiches at Subway",
+    
+    # Office/Service
+    "filed paperwork at an office", "answered phones at a call center", "did data entry", "made copies and scanned documents",
+    "worked reception desk", "sorted mail at post office", "updated customer databases", "scheduled appointments",
+    "worked at bank teller window", "helped customers at DMV", "worked at phone store", "worked at gas station",
+    
+    # Manual Labor
+    "loaded boxes at Amazon warehouse", "worked construction cleanup", "painted houses", "helped people move",
+    "worked landscaping", "cleaned office buildings", "worked at car wash", "did home repairs",
+    "worked at recycling center", "unloaded freight trucks", "worked factory assembly line", "cleaned windows",
+    
+    # Services
+    "delivered for DoorDash", "drove for Uber", "worked at movie theater", "worked at gym front desk",
+    "worked at library", "tutored kids", "walked dogs", "pet-sat", "house-sat", "baby-sat"
 ]
 
 CRIME_ACTIVITIES = [
-    "pickpocketed a stranger", "hacked a vending machine", "sneaked into a movie",
-    "stole candy from a store", "jumped a subway turnstile", "copied homework"
+    # Workplace "crimes"
+    "took extra napkins from fast food", "used work wifi for personal stuff", "took longer breaks than allowed",
+    "used company printer for personal use", "took pens from work", "ate someone's lunch from office fridge",
+    "used sick day when not really sick", "browsed social media during work", "took extra coffee from break room",
+    "left work 5 minutes early", "used work bathroom excessively", "took free mints from restaurant",
+    
+    # Store/Shopping "crimes"
+    "opened bag of chips before paying", "ate grapes while shopping", "used express lane with too many items",
+    "didn't return shopping cart", "cut in line at checkout", "price-checked everything twice",
+    "used student discount without being student", "tried on clothes with no intention to buy", "squeezed all the bread loaves",
+    
+    # Social "crimes"
+    "spoiled movie endings", "left someone on read", "didn't hold elevator door", "took the good parking spot",
+    "walked slowly in front of people", "chewed loudly in quiet places", "talked during movies",
+    "didn't say thanks when door was held", "cut in line at coffee shop", "took up two seats on bus",
+    
+    # Digital "crimes"
+    "used someone's Netflix password", "didn't skip YouTube ads for creator", "used free trial with fake email",
+    "downloaded music illegally", "used fake birthday for discounts", "made multiple email accounts for free trials",
+    "used VPN to get cheaper prices", "shared streaming passwords", "used incognito mode to avoid cookies",
+    
+    # Everyday "crimes"
+    "jaywalked across street", "littered a gum wrapper", "parked slightly over the line", "used bathroom without buying anything",
+    "took extra sauce packets", "mixed different sodas at fountain", "didn't tip delivery driver enough",
+    "returned item after using it once", "claimed package was lost when it wasn't", "used expired coupon"
 ]
 
 def load_data():
