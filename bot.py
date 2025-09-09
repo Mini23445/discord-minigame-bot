@@ -440,9 +440,9 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         return
 
 # Make coinflip 5% more likely for the member to lose (55% chance to lose)
-win_chance = 45.0  # 45% chance to win
-random_number = random.uniform(0, 100)
-won = random_number <= win_chance
+    win_chance = 45.0  # 45% chance to win
+    random_number = random.uniform(0, 100)
+    won = random_number <= win_chance
     
     result = choice if won else ('tails' if choice == 'heads' else 'heads')
     
