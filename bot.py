@@ -32,6 +32,11 @@ shop_data = []
 cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
 pending_duels = {}
 
+# Data file paths
+USER_DATA_FILE = 'user_data.json'
+SHOP_DATA_FILE = 'shop_data.json'
+COOLDOWNS_FILE = 'cooldowns.json'
+
 WORK_JOBS = [
     # Retail/Supermarket
     "worked as a cashier at the supermarket", "stocked shelves at the grocery store", "bagged groceries for customers",
@@ -63,7 +68,7 @@ WORK_JOBS = [
 CRIME_ACTIVITIES = [
     # Workplace "crimes"
     "took extra napkins from fast food", "used work wifi for personal stuff", "took longer breaks than allowed",
-    "used company printer for personal use", "took pens from work", "ate someone's lunch from office fridge",
+    "used company printer for personal use", "took pens from work", "eat someone's lunch from office fridge",
     "used sick day when not really sick", "browsed social media during work", "took extra coffee from break room",
     "left work 5 minutes early", "used work bathroom excessively", "took free mints from restaurant",
     
@@ -92,14 +97,14 @@ def load_data():
     """Load all data from files"""
     global user_data, shop_data, cooldowns
     try:
-        if os.path.exists('user_data.json'):
-            with open('user_data.json', 'r') as f:
+        if os.path.exists(USER_DATA_FILE):
+            with open(USER_DATA_FILE, 'r') as f:
                 user_data = json.load(f)
-        if os.path.exists('shop_data.json'):
-            with open('shop_data.json', 'r') as f:
+        if os.path.exists(SHOP_DATA_FILE):
+            with open(SHOP_DATA_FILE, 'r') as f:
                 shop_data = json.load(f)
-        if os.path.exists('cooldowns.json'):
-            with open('cooldowns.json', 'r') as f:
+        if os.path.exists(COOLDOWNS_FILE):
+            with open(COOLDOWNS_FILE, 'r') as f:
                 cooldowns = json.load(f)
         print("✅ Data loaded successfully")
     except Exception as e:
@@ -108,12 +113,13 @@ def load_data():
 def save_data():
     """Save all data to files"""
     try:
-        with open('user_data.json', 'w') as f:
+        with open(USER_DATA_FILE, 'w') as f:
             json.dump(user_data, f, indent=2)
-        with open('shop_data.json', 'w') as f:
+        with open(SHOP_DATA_FILE, 'w') as f:
             json.dump(shop_data, f, indent=2)
-        with open('cooldowns.json', 'w') as f:
+        with open(COOLDOWNS_FILE, 'w') as f:
             json.dump(cooldowns, f, indent=2)
+        print("💾 Data saved successfully")
     except Exception as e:
         print(f"⚠️ Error saving data: {e}")
 
@@ -439,8 +445,7 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
         return
 
-# Make coinflip 5% more likely for the member to lose (55% chance to lose)
-    win_chance = 49.0  # 45% chance to win
+    win_chance = 49.0  # 55% chance to win
     random_number = random.uniform(0, 100)
     won = random_number <= win_chance
     
@@ -1313,6 +1318,47 @@ async def addtoken(interaction: discord.Interaction, user: discord.Member, amoun
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+@bot.tree.command(name="removetoken", description="Remove tokens from a user (Admin only)")
+async def removetoken(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be positive!", ephemeral=True)
+        return
+    
+    current_balance = get_user_balance(user.id)
+    if current_balance < amount:
+        await interaction.response.send_message(
+            f"❌ User only has {current_balance:,} tokens! Cannot remove {amount:,} tokens.",
+            ephemeral=True
+        )
+        return
+    
+    new_balance = update_balance(user.id, -amount)
+    save_data()
+    
+    await log_action(
+        "REMOVE_TOKENS",
+        "💰 Tokens Removed",
+        f"**{interaction.user.mention}** removed **{amount:,} tokens** from {user.mention}",
+        color=0xff4444,
+        user=interaction.user,
+        fields=[
+            {"name": "Target User", "value": user.mention, "inline": True},
+            {"name": "Amount Removed", "value": f"{amount:,} 🪙", "inline": True},
+            {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
+        ]
+    )
+    
+    embed = discord.Embed(title="✅ Tokens Removed", color=0xff4444)
+    embed.add_field(name="User", value=user.mention, inline=True)
+    embed.add_field(name="Removed", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 @bot.command(name="about")
 async def about(ctx):
     """Traditional text command for bot info"""
@@ -1356,6 +1402,20 @@ async def about(ctx):
         ),
         inline=False
     )
+    
+    # Admin Commands
+    if is_admin(ctx.author):
+        embed.add_field(
+            name="⚙️ Admin Commands",
+            value=(
+                "`/addtoken <user> <amount>` - Add tokens to user\n"
+                "`/removetoken <user> <amount>` - Remove tokens from user\n"
+                "`/adminbalance <user>` - Check user's balance\n"
+                "`/addshop` - Manage shop items\n"
+                "`/resetdata <code>` - Reset all user data"
+            ),
+            inline=False
+        )
     
     # Token Earning Info
     embed.add_field(
