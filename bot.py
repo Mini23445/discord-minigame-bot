@@ -445,7 +445,7 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
         return
 
-    win_chance = 49.0  # 55% chance to win
+    win_chance = 49.1  # 55% chance to win
     random_number = random.uniform(0, 100)
     won = random_number <= win_chance
     
