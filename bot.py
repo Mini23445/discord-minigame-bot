@@ -957,10 +957,9 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
         similar = [i['name'] for i in shop_data if item_name.lower() in i['name'].lower()]
         error_msg = f"❌ Item **{item_name}** not found!"
         if similar:
-            error_msg += f"\n\nDid you mean: {', '.join(similar[:3])}?"
+            error_msg += f"\n\nDid you mean: {', '.join(similar[:3])}"
         await interaction.response.send_message(error_msg, ephemeral=True)
         return
-
     
     balance = get_user_balance(interaction.user.id)
     total_cost = item['price'] * quantity
