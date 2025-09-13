@@ -957,7 +957,7 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
         similar = [i['name'] for i in shop_data if item_name.lower() in i['name'].lower()]
         error_msg = f"❌ Item **{item_name}** not found!"
         if similar:
-            error_msg += f"\n\nDid you mean: {', '.join(similar[:3])}"
+            error_msg += f"\n\nDid you mean: {', '.join(similar[:3])}?"
         await interaction.response.send_message(error_msg, ephemeral=True)
         return
     
@@ -980,18 +980,17 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
     await save_data()
     
     # Log the purchase
-await log_purchase(interaction.user, item['name'], item['price'], quantity)
+    await log_purchase(interaction.user, item['name'], item['price'], quantity)
 
-embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
-embed.add_field(name="Item", value=item['name'], inline=True)
-embed.add_field(name="Quantity", value=str(quantity), inline=True)
-embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)  # Fixed indentation
-embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
+    embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
+    embed.add_field(name="Item", value=item['name'], inline=True)
+    embed.add_field(name="Quantity", value=str(quantity), inline=True)
+    embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
 
-# Send the embed message
-await interaction.response.send_message(embed=embed)
+    # Send the embed message
+    await interaction.response.send_message(embed=embed)
 
-    
     if item.get('description'):
         embed.add_field(name="Description", value=item['description'], inline=False)
     
@@ -1042,12 +1041,13 @@ class AddItemModal(discord.ui.Modal):
             f"**{interaction.user.mention}** added new item to shop",
             color=0x00ff00,
             user=interaction.user,
-            fields=[
-                {"name": "Item Name", "value": new_item['name'], "inline": True},
+            fields=[{
+                "name": "Item Name", "value": new_item['name'], "inline": True},
                 {"name": "Price", "value": f"{new_item['price']:,} 🪙", "inline": True},
                 {"name": "Description", "value": new_item['description'] or "No description", "inline": False}
             ]
         )
+
         
         embed = discord.Embed(title="✅ Item Added!", color=0x00ff00)
         embed.add_field(name="Name", value=new_item['name'], inline=False)
