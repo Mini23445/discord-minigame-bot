@@ -30,9 +30,9 @@ PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
 # Roles that get extra entries in giveaways (customize these IDs for your server)
 # Format: {role_id: extra_entries}
 PRIORITY_ROLES = {
-    1410911675351306250: 7,  # Highest priority role - 7 extra entries
-    1410911675351306251: 5,  # Medium priority role - 5 extra entries  
-    1410911675351306252: 3,  # Low priority role - 3 extra entries
+    1410917252190179369: 7,  # Highest priority role - 7 extra entries
+    1410917163933503521: 5,  # Medium priority role - 5 extra entries  
+    1410917146459897928: 3,  # Low priority role - 3 extra entries
 }
 
 # Data storage
@@ -897,17 +897,17 @@ class ShopView(discord.ui.View):
         
         embed = discord.Embed(title="🛒 Purchase Confirmation", color=0xFFD700)
         embed.add_field(name="Item", value=item['name'], inline=True)
-embed.add_field(name="Cost", value=f"{item['price']:,} 🪙", inline=True)
-embed.add_field(name="Your Balance", value=f"{balance:,} 🪙", inline=True)
-embed.add_field(name="Balance After", value=f"{balance - item['price']:,} 🪙", inline=True)
-
-if item.get('description'):
-    embed.add_field(name="Description", value=item['description'], inline=False)
-
-embed.set_footer(text="Are you sure you want to buy this item?")
-
-view = PurchaseConfirmView(item, interaction.user.id)
-await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        embed.add_field(name="Cost", value=f"{item['price']:,} 🪙", inline=True)
+        embed.add_field(name="Your Balance", value=f"{balance:,} 🪙", inline=True)
+        embed.add_field(name="Balance After", value=f"{balance - item['price']:,} 🪙", inline=True)
+        
+        if item.get('description'):
+            embed.add_field(name="Description", value=item['description'], inline=False)
+        
+        embed.set_footer(text="Are you sure you want to buy this item?")
+        
+        view = PurchaseConfirmView(item, interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 @bot.tree.command(name="shop", description="Browse the token shop")
 async def shop(interaction: discord.Interaction):
@@ -1074,7 +1074,6 @@ class UpdateItemModal(discord.ui.Modal):
             await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
             return
         
-        # Update name if provided
         if self.name.value.strip():
             for i, item in enumerate(shop_data):
                 if i != item_idx and item['name'].lower() == self.name.value.lower():
@@ -1082,7 +1081,6 @@ class UpdateItemModal(discord.ui.Modal):
                     return
             shop_data[item_idx]['name'] = self.name.value.strip()
         
-        # Update price if provided
         if self.price.value.strip():
             try:
                 new_price = int(self.price.value)
@@ -1091,10 +1089,9 @@ class UpdateItemModal(discord.ui.Modal):
                     return
                 shop_data[item_idx]['price'] = new_price
             except:
-                await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
                 return
         
-        # Update description if provided
         if self.description.value.strip():
             shop_data[item_idx]['description'] = self.description.value.strip()
         
@@ -1103,23 +1100,23 @@ class UpdateItemModal(discord.ui.Modal):
         # Log shop item update
         await log_action(
             "SHOP_UPDATE",
-            "🛒 Shop Item Updated",
-            f"**{interaction.user.mention}** updated shop item #{item_idx + 1}",
-            color=0xffa500,
+            "✏️ Shop Item Updated",
+            f"**{interaction.user.mention}** updated shop item",
+            color=0x0099ff,
             user=interaction.user,
             fields=[
                 {"name": "Item", "value": shop_data[item_idx]['name'], "inline": True},
                 {"name": "Price", "value": f"{shop_data[item_idx]['price']:,} 🪙", "inline": True},
-                {"name": "Description", "value": shop_data[item_idx]['description'] or "No description", "inline": False}
+                {"name": "Changes Made", "value": "Updated item properties", "inline": False}
             ]
         )
         
-        embed = discord.Embed(title="✅ Item Updated!", color=0xffa500)
-        embed.add_field(name="Item", value=shop_data[item_idx]['name'], inline=False)
-        embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=False)
-        embed.add_field(name="Description", value=shop_data[item_idx]['description'] or "No description", inline=False)
+        embed = discord.Embed(title="✅ Item Updated!", color=0x0099ff)
+        embed.add_field(name="Item", value=shop_data[item_idx]['name'], inline=True)
+        embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=True)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
 class DeleteItemModal(discord.ui.Modal):
     def __init__(self):
         super().__init__(title="Delete Shop Item")
