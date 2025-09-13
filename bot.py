@@ -985,7 +985,7 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
     embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
     embed.add_field(name="Item", value=item['name'], inline=True)
     embed.add_field(name="Quantity", value=str(quantity), inline=True)
-     embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
+    embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
     embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
     
     if item.get('description'):
