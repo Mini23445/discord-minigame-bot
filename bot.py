@@ -897,17 +897,17 @@ class ShopView(discord.ui.View):
         
         embed = discord.Embed(title="🛒 Purchase Confirmation", color=0xFFD700)
         embed.add_field(name="Item", value=item['name'], inline=True)
-        embed.add_field(name="Cost", value=f"{item['price']:,} 🪙", inline=True)
-        embed.add_field(name="Your Balance", value=f"{balance:,} 🪙", inline=True)
-        embed.add_field(name="Balance After", value=f"{balance - item['price']:,} 🪙", inline=True)
-        
-        if item.get('description'):
-            embed.add_field(name="Description", value=item['description'], inline=False)
-        
-        embed.set_footer(text="Are you sure you want to buy this item?")
-        
-        view = PurchaseConfirmView(item, interaction.user.id)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+embed.add_field(name="Cost", value=f"{item['price']:,} 🪙", inline=True)
+embed.add_field(name="Your Balance", value=f"{balance:,} 🪙", inline=True)
+embed.add_field(name="Balance After", value=f"{balance - item['price']:,} 🪙", inline=True)
+
+if item.get('description'):
+    embed.add_field(name="Description", value=item['description'], inline=False)
+
+embed.set_footer(text="Are you sure you want to buy this item?")
+
+view = PurchaseConfirmView(item, interaction.user.id)
+await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 @bot.tree.command(name="shop", description="Browse the token shop")
 async def shop(interaction: discord.Interaction):
@@ -974,25 +974,25 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
         )
         return
     
-# Purchase successful
-new_balance = update_balance(interaction.user.id, -total_cost)
-set_short_cooldown(interaction.user.id, "buy")
-await save_data()
-
-# Log the purchase
-await log_purchase(interaction.user, item['name'], item['price'], quantity)
-
-embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
-embed.add_field(name="Item", value=item['name'], inline=True)
-embed.add_field(name="Quantity", value=str(quantity), inline=True)
-embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
-embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
-
-if item.get('description'):
-    embed.add_field(name="Description", value=item['description'], inline=False)
-
-embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-await interaction.response.send_message(embed=embed, ephemeral=True)
+    # Purchase successful
+    new_balance = update_balance(interaction.user.id, -total_cost)
+    set_short_cooldown(interaction.user.id, "buy")
+    await save_data()
+    
+    # Log the purchase
+    await log_purchase(interaction.user, item['name'], item['price'], quantity)
+    
+    embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
+    embed.add_field(name="Item", value=item['name'], inline=True)
+    embed.add_field(name="Quantity", value=str(quantity), inline=True)
+    embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
+    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
+    
+    if item.get('description'):
+        embed.add_field(name="Description", value=item['description'], inline=False)
+    
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # Shop management modals and views
 class AddItemModal(discord.ui.Modal):
@@ -1120,7 +1120,6 @@ class UpdateItemModal(discord.ui.Modal):
         embed.add_field(name="Description", value=shop_data[item_idx]['description'] or "No description", inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
 class DeleteItemModal(discord.ui.Modal):
     def __init__(self):
         super().__init__(title="Delete Shop Item")
