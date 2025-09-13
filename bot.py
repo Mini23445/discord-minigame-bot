@@ -975,24 +975,24 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
         return
     
 # Purchase successful
-    new_balance = update_balance(interaction.user.id, -total_cost)
-    set_short_cooldown(interaction.user.id, "buy")
-    await save_data()
-    
-    # Log the purchase
-    await log_purchase(interaction.user, item['name'], item['price'], quantity)
-    
-    embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
-    embed.add_field(name="Item", value=item['name'], inline=True)
-    embed.add_field(name="Quantity", value=str(quantity), inline=True)
-    embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
-    
-    if item.get('description'):
-        embed.add_field(name="Description", value=item['description'], inline=False)
-    
-    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+new_balance = update_balance(interaction.user.id, -total_cost)
+set_short_cooldown(interaction.user.id, "buy")
+await save_data()
+
+# Log the purchase
+await log_purchase(interaction.user, item['name'], item['price'], quantity)
+
+embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
+embed.add_field(name="Item", value=item['name'], inline=True)
+embed.add_field(name="Quantity", value=str(quantity), inline=True)
+embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
+embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
+
+if item.get('description'):
+    embed.add_field(name="Description", value=item['description'], inline=False)
+
+embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # Shop management modals and views
 class AddItemModal(discord.ui.Modal):
@@ -1070,10 +1070,31 @@ class UpdateItemModal(discord.ui.Modal):
             if item_idx < 0 or item_idx >= len(shop_data):
                 await interaction.response.send_message(f"❌ Invalid item number! Must be 1-{len(shop_data)}", ephemeral=True)
                 return
-                    except:
+        except:
+            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
+            return
+        
+        # Update name if provided
+        if self.name.value.strip():
+            for i, item in enumerate(shop_data):
+                if i != item_idx and item['name'].lower() == self.name.value.lower():
+                    await interaction.response.send_message("❌ Item with this name already exists!", ephemeral=True)
+                    return
+            shop_data[item_idx]['name'] = self.name.value.strip()
+        
+        # Update price if provided
+        if self.price.value.strip():
+            try:
+                new_price = int(self.price.value)
+                if new_price <= 0:
+                    await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
+                    return
+                shop_data[item_idx]['price'] = new_price
+            except:
                 await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
                 return
         
+        # Update description if provided
         if self.description.value.strip():
             shop_data[item_idx]['description'] = self.description.value.strip()
         
@@ -1097,72 +1118,6 @@ class UpdateItemModal(discord.ui.Modal):
         embed.add_field(name="Item", value=shop_data[item_idx]['name'], inline=False)
         embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=False)
         embed.add_field(name="Description", value=shop_data[item_idx]['description'] or "No description", inline=False)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-class UpdateItemModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="Update Shop Item")
-    
-    item_number = discord.ui.TextInput(label="Item Number", placeholder="Enter number (1, 2, 3...)")
-    name = discord.ui.TextInput(label="New Name (optional)", required=False)
-    price = discord.ui.TextInput(label="New Price (optional)", required=False)
-    description = discord.ui.TextInput(label="New Description (optional)", required=False, style=discord.TextStyle.long)
-    
-    async def on_submit(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Admin only!", ephemeral=True)
-            return
-            
-        try:
-            item_idx = int(self.item_number.value) - 1
-            if item_idx < 0 or item_idx >= len(shop_data):
-                await interaction.response.send_message(f"❌ Invalid item number! Must be 1-{len(shop_data)}", ephemeral=True)
-                return
-        except:
-            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
-            return
-        
-        if self.name.value.strip():
-            for i, item in enumerate(shop_data):
-                if i != item_idx and item['name'].lower() == self.name.value.lower():
-                    await interaction.response.send_message("❌ Item with this name already exists!", ephemeral=True)
-                    return
-            shop_data[item_idx]['name'] = self.name.value.strip()
-        
-        if self.price.value.strip():
-            try:
-                new_price = int(self.price.value)
-                if new_price <= 0:
-                    await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
-                    return
-                shop_data[item_idx]['price'] = new_price
-            except:
-            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
-            return
-        
-        if self.description.value.strip():
-            shop_data[item_idx]['description'] = self.description.value.strip()
-        
-        await save_data()
-        
-        # Log shop item update
-        await log_action(
-            "SHOP_UPDATE",
-            "✏️ Shop Item Updated",
-            f"**{interaction.user.mention}** updated shop item",
-            color=0x0099ff,
-            user=interaction.user,
-            fields=[
-                {"name": "Item", "value": shop_data[item_idx]['name'], "inline": True},
-                {"name": "Price", "value": f"{shop_data[item_idx]['price']:,} 🪙", "inline": True},
-                {"name": "Changes Made", "value": "Updated item properties", "inline": False}
-            ]
-        )
-        
-        embed = discord.Embed(title="✅ Item Updated!", color=0x0099ff)
-        embed.add_field(name="Item", value=shop_data[item_idx]['name'], inline=True)
-        embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=True)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
