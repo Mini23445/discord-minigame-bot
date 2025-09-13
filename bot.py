@@ -1089,8 +1089,8 @@ class UpdateItemModal(discord.ui.Modal):
                     return
                 shop_data[item_idx]['price'] = new_price
             except:
-            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
-                return
+            await interaction.response.send_message("❌ Item number must be a valid number!", ephemeral=True)
+            return
         
         if self.description.value.strip():
             shop_data[item_idx]['description'] = self.description.value.strip()
