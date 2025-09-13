@@ -70,7 +70,7 @@ WORK_JOBS = [
     "helped people move", "worked landscaping", "cleaned office buildings", "worked at car wash",
     "did home repairs", "worked at recycling center", "unloaded freight trucks",
     "worked factory assembly line", "cleaned windows", "delivered for DoorDash",
-    "drove for Uber", "worked at movie theater", "worked at gym front desk",
+    "drove for Uber", "worked at movie theater",
     "worked at library", "tutored kids", "walked dogs", "pet-sat", "house-sat", "baby-sat"
 ]
 
