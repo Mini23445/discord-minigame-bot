@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 import time
 import sys
+import aiofiles
 
 # Railway logging setup
 import logging
@@ -26,108 +27,180 @@ ADMIN_ROLE_ID = 1410911675351306250
 LOG_CHANNEL_ID = 1413818486404415590
 PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
 
+# Roles that get extra entries in giveaways (customize these IDs for your server)
+# Format: {role_id: extra_entries}
+PRIORITY_ROLES = {
+    1410911675351306250: 7,  # Highest priority role - 7 extra entries
+    1410911675351306251: 5,  # Medium priority role - 5 extra entries  
+    1410911675351306252: 3,  # Low priority role - 3 extra entries
+}
+
 # Data storage
 user_data = {}
 shop_data = []
-cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
+cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
 pending_duels = {}
+active_giveaways = {}
+giveaway_daily_totals = {}  # Track daily giveaway amounts
 
 # Data file paths
 USER_DATA_FILE = 'user_data.json'
 SHOP_DATA_FILE = 'shop_data.json'
 COOLDOWNS_FILE = 'cooldowns.json'
+GIVEAWAYS_FILE = 'giveaways.json'
+DAILY_GIVEAWAYS_FILE = 'daily_giveaways.json'
 
 WORK_JOBS = [
-    # Retail/Supermarket
-    "worked as a cashier at the supermarket", "stocked shelves at the grocery store", "bagged groceries for customers",
-    "worked the deli counter", "organized the produce section", "cleaned shopping carts", "collected carts from the parking lot",
-    "worked customer service desk", "restocked the dairy section", "faced products on shelves", "worked the bakery counter",
-    "unloaded delivery trucks", "worked overnight stocking shift", "operated the floor buffer", "cleaned the break room",
-    "worked at Target", "worked at Walmart", "worked at Best Buy", "worked at Home Depot", "worked at CVS pharmacy",
-    
-    # Fast Food/Restaurant
-    "worked the drive-thru window", "flipped burgers at McDonald's", "worked the fryer at KFC", "prepped vegetables at Subway",
-    "worked as a server at Applebee's", "bussed tables at Olive Garden", "worked as a host at Chili's", "cleaned the kitchen at Taco Bell",
-    "worked the pizza oven", "delivered pizzas", "worked at Starbucks", "worked at Dunkin Donuts", "made sandwiches at Subway",
-    
-    # Office/Service
-    "filed paperwork at an office", "answered phones at a call center", "did data entry", "made copies and scanned documents",
-    "worked reception desk", "sorted mail at post office", "updated customer databases", "scheduled appointments",
-    "worked at bank teller window", "helped customers at DMV", "worked at phone store", "worked at gas station",
-    
-    # Manual Labor
-    "loaded boxes at Amazon warehouse", "worked construction cleanup", "painted houses", "helped people move",
-    "worked landscaping", "cleaned office buildings", "worked at car wash", "did home repairs",
-    "worked at recycling center", "unloaded freight trucks", "worked factory assembly line", "cleaned windows",
-    
-    # Services
-    "delivered for DoorDash", "drove for Uber", "worked at movie theater", "worked at gym front desk",
+    "worked as a cashier at the supermarket", "stocked shelves at the grocery store", 
+    "bagged groceries for customers", "worked the deli counter", "organized the produce section",
+    "cleaned shopping carts", "collected carts from the parking lot", "worked customer service desk",
+    "restocked the dairy section", "faced products on shelves", "worked the bakery counter",
+    "unloaded delivery trucks", "worked overnight stocking shift", "operated the floor buffer",
+    "cleaned the break room", "worked at Target", "worked at Walmart", "worked at Best Buy",
+    "worked at Home Depot", "worked at CVS pharmacy", "worked the drive-thru window",
+    "flipped burgers at McDonald's", "worked the fryer at KFC", "prepped vegetables at Subway",
+    "worked as a server at Applebee's", "bussed tables at Olive Garden", "worked as a host at Chili's",
+    "cleaned the kitchen at Taco Bell", "worked the pizza oven", "delivered pizzas",
+    "worked at Starbucks", "worked at Dunkin Donuts", "made sandwiches at Subway",
+    "filed paperwork at an office", "answered phones at a call center", "did data entry",
+    "made copies and scanned documents", "worked reception desk", "sorted mail at post office",
+    "updated customer databases", "scheduled appointments", "worked at bank teller window",
+    "helped customers at DMV", "worked at phone store", "worked at gas station",
+    "loaded boxes at Amazon warehouse", "worked construction cleanup", "painted houses",
+    "helped people move", "worked landscaping", "cleaned office buildings", "worked at car wash",
+    "did home repairs", "worked at recycling center", "unloaded freight trucks",
+    "worked factory assembly line", "cleaned windows", "delivered for DoorDash",
+    "drove for Uber", "worked at movie theater", "worked at gym front desk",
     "worked at library", "tutored kids", "walked dogs", "pet-sat", "house-sat", "baby-sat"
 ]
 
 CRIME_ACTIVITIES = [
-    # Workplace "crimes"
-    "took extra napkins from fast food", "used work wifi for personal stuff", "took longer breaks than allowed",
-    "used company printer for personal use", "took pens from work", "eat someone's lunch from office fridge",
-    "used sick day when not really sick", "browsed social media during work", "took extra coffee from break room",
-    "left work 5 minutes early", "used work bathroom excessively", "took free mints from restaurant",
-    
-    # Store/Shopping "crimes"
-    "opened bag of chips before paying", "ate grapes while shopping", "used express lane with too many items",
-    "didn't return shopping cart", "cut in line at checkout", "price-checked everything twice",
-    "used student discount without being student", "tried on clothes with no intention to buy", "squeezed all the bread loaves",
-    
-    # Social "crimes"
-    "spoiled movie endings", "left someone on read", "didn't hold elevator door", "took the good parking spot",
-    "walked slowly in front of people", "chewed loudly in quiet places", "talked during movies",
-    "didn't say thanks when door was held", "cut in line at coffee shop", "took up two seats on bus",
-    
-    # Digital "crimes"
-    "used someone's Netflix password", "didn't skip YouTube ads for creator", "used free trial with fake email",
-    "downloaded music illegally", "used fake birthday for discounts", "made multiple email accounts for free trials",
-    "used VPN to get cheaper prices", "shared streaming passwords", "used incognito mode to avoid cookies",
-    
-    # Everyday "crimes"
-    "jaywalked across street", "littered a gum wrapper", "parked slightly over the line", "used bathroom without buying anything",
-    "took extra sauce packets", "mixed different sodas at fountain", "didn't tip delivery driver enough",
-    "returned item after using it once", "claimed package was lost when it wasn't", "used expired coupon"
+    "took extra napkins from fast food", "used work wifi for personal stuff", 
+    "took longer breaks than allowed", "used company printer for personal use",
+    "took pens from work", "ate someone's lunch from office fridge",
+    "used sick day when not really sick", "browsed social media during work",
+    "took extra coffee from break room", "left work 5 minutes early",
+    "used work bathroom excessively", "took free mints from restaurant",
+    "opened bag of chips before paying", "ate grapes while shopping",
+    "used express lane with too many items", "didn't return shopping cart",
+    "cut in line at checkout", "price-checked everything twice",
+    "used student discount without being student", "tried on clothes with no intention to buy",
+    "squeezed all the bread loaves", "spoiled movie endings", "left someone on read",
+    "didn't hold elevator door", "took the good parking spot", "walked slowly in front of people",
+    "chewed loudly in quiet places", "talked during movies", "didn't say thanks when door was held",
+    "cut in line at coffee shop", "took up two seats on bus", "used someone's Netflix password",
+    "didn't skip YouTube ads for creator", "used free trial with fake email",
+    "downloaded music illegally", "used fake birthday for discounts",
+    "made multiple email accounts for free trials", "used VPN to get cheaper prices",
+    "shared streaming passwords", "used incognito mode to avoid cookies",
+    "jaywalked across street", "littered a gum wrapper", "parked slightly over the line",
+    "used bathroom without buying anything", "took extra sauce packets",
+    "mixed different sodas at fountain", "didn't tip delivery driver enough",
+    "returned item after using it once", "claimed package was lost when it wasn't",
+    "used expired coupon"
 ]
 
-def load_data():
+async def load_data():
     """Load all data from files"""
-    global user_data, shop_data, cooldowns
+    global user_data, shop_data, cooldowns, active_giveaways, giveaway_daily_totals
+    
     try:
+        # Load user data
         if os.path.exists(USER_DATA_FILE):
-            with open(USER_DATA_FILE, 'r') as f:
-                user_data = json.load(f)
+            async with aiofiles.open(USER_DATA_FILE, 'r') as f:
+                contents = await f.read()
+                user_data = json.loads(contents)
+                print(f"✅ Loaded user data for {len(user_data)} users")
+        else:
+            print("ℹ️ No user data file found, starting fresh")
+            user_data = {}
+            
+        # Load shop data
         if os.path.exists(SHOP_DATA_FILE):
-            with open(SHOP_DATA_FILE, 'r') as f:
-                shop_data = json.load(f)
+            async with aiofiles.open(SHOP_DATA_FILE, 'r') as f:
+                contents = await f.read()
+                shop_data = json.loads(contents)
+                print(f"✅ Loaded {len(shop_data)} shop items")
+        else:
+            print("ℹ️ No shop data file found, starting fresh")
+            shop_data = []
+            
+        # Load cooldowns
         if os.path.exists(COOLDOWNS_FILE):
-            with open(COOLDOWNS_FILE, 'r') as f:
-                cooldowns = json.load(f)
-        print("✅ Data loaded successfully")
+            async with aiofiles.open(COOLDOWNS_FILE, 'r') as f:
+                contents = await f.read()
+                cooldowns = json.loads(contents)
+                print("✅ Loaded cooldown data")
+        else:
+            print("ℹ️ No cooldowns file found, starting fresh")
+            cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
+        
+        # Load active giveaways
+        if os.path.exists(GIVEAWAYS_FILE):
+            async with aiofiles.open(GIVEAWAYS_FILE, 'r') as f:
+                contents = await f.read()
+                active_giveaways = json.loads(contents)
+                print(f"✅ Loaded {len(active_giveaways)} active giveaways")
+        else:
+            print("ℹ️ No giveaways file found, starting fresh")
+            active_giveaways = {}
+            
+        # Load daily giveaway totals
+        if os.path.exists(DAILY_GIVEAWAYS_FILE):
+            async with aiofiles.open(DAILY_GIVEAWAYS_FILE, 'r') as f:
+                contents = await f.read()
+                giveaway_daily_totals = json.loads(contents)
+                print("✅ Loaded daily giveaway totals")
+        else:
+            print("ℹ️ No daily giveaways file found, starting fresh")
+            giveaway_daily_totals = {}
+            
     except Exception as e:
         print(f"⚠️ Error loading data: {e}")
+        # Initialize empty data structures if loading fails
+        user_data = {}
+        shop_data = []
+        cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
+        active_giveaways = {}
+        giveaway_daily_totals = {}
 
-def save_data():
+async def save_data():
     """Save all data to files"""
     try:
-        with open(USER_DATA_FILE, 'w') as f:
-            json.dump(user_data, f, indent=2)
-        with open(SHOP_DATA_FILE, 'w') as f:
-            json.dump(shop_data, f, indent=2)
-        with open(COOLDOWNS_FILE, 'w') as f:
-            json.dump(cooldowns, f, indent=2)
+        # Save user data
+        async with aiofiles.open(USER_DATA_FILE, 'w') as f:
+            await f.write(json.dumps(user_data, indent=2))
+        
+        # Save shop data
+        async with aiofiles.open(SHOP_DATA_FILE, 'w') as f:
+            await f.write(json.dumps(shop_data, indent=2))
+        
+        # Save cooldowns
+        async with aiofiles.open(COOLDOWNS_FILE, 'w') as f:
+            await f.write(json.dumps(cooldowns, indent=2))
+            
+        # Save active giveaways
+        async with aiofiles.open(GIVEAWAYS_FILE, 'w') as f:
+            await f.write(json.dumps(active_giveaways, indent=2))
+            
+        # Save daily giveaway totals
+        async with aiofiles.open(DAILY_GIVEAWAYS_FILE, 'w') as f:
+            await f.write(json.dumps(giveaway_daily_totals, indent=2))
+            
         print("💾 Data saved successfully")
+        return True
     except Exception as e:
         print(f"⚠️ Error saving data: {e}")
+        return False
 
-def force_save_on_exit():
+async def force_save_on_exit():
     """Force save data when bot shuts down"""
+    print("🔄 Bot shutting down, saving data...")
     try:
-        save_data()
-        print("💾 Data saved on exit")
+        if await save_data():
+            print("💾 Data saved on exit")
+        else:
+            print("❌ Failed to save data on exit")
     except Exception as e:
         print(f"⚠️ Error saving on exit: {e}")
 
@@ -271,7 +344,7 @@ async def auto_save():
     """Auto save every 30 seconds"""
     while True:
         await asyncio.sleep(30)
-        save_data()
+        await save_data()
 
 # Clean up expired duels
 async def cleanup_expired_duels():
@@ -292,14 +365,52 @@ async def cleanup_expired_duels():
         for expired_key in expired_duels:
             del pending_duels[expired_key]
 
+# Clean up expired giveaways
+async def cleanup_expired_giveaways():
+    """Clean up expired giveaways"""
+    while True:
+        await asyncio.sleep(60)  # 1 minute
+        current_time = datetime.now()
+        expired_giveaways = []
+        
+        for giveaway_id, giveaway_data in active_giveaways.items():
+            try:
+                end_time = datetime.fromisoformat(giveaway_data['end_time'])
+                if current_time >= end_time:
+                    expired_giveaways.append(giveaway_id)
+            except:
+                expired_giveaways.append(giveaway_id)
+        
+        for expired_id in expired_giveaways:
+            del active_giveaways[expired_id]
+            await save_data()
+
+# Reset daily giveaway totals at midnight
+async def reset_daily_giveaway_totals():
+    """Reset daily giveaway totals at midnight"""
+    while True:
+        now = datetime.now()
+        # Calculate time until next midnight
+        next_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        wait_seconds = (next_midnight - now).total_seconds()
+        
+        await asyncio.sleep(wait_seconds)
+        
+        # Reset daily totals
+        giveaway_daily_totals.clear()
+        await save_data()
+        print("🔄 Reset daily giveaway totals")
+
 @bot.event
 async def on_ready():
     print(f'🚀 {bot.user} is online!')
-    load_data()
+    await load_data()
     
     # Start background tasks
-    asyncio.create_task(auto_save())
-    asyncio.create_task(cleanup_expired_duels())
+    bot.auto_save_task = asyncio.create_task(auto_save())
+    bot.cleanup_task = asyncio.create_task(cleanup_expired_duels())
+    bot.giveaway_cleanup_task = asyncio.create_task(cleanup_expired_giveaways())
+    bot.daily_reset_task = asyncio.create_task(reset_daily_giveaway_totals())
     
     try:
         synced = await bot.tree.sync()
@@ -353,7 +464,7 @@ async def daily(interaction: discord.Interaction):
     tokens = random.randint(1, 50)
     new_balance = update_balance(interaction.user.id, tokens)
     cooldowns["daily"][str(interaction.user.id)] = datetime.now().isoformat()
-    save_data()
+    await save_data()
     
     embed = discord.Embed(title="🎁 Daily Reward!", color=0x00ff00)
     embed.add_field(name="Earned", value=f"{tokens:,} 🪙", inline=True)
@@ -375,7 +486,7 @@ async def work(interaction: discord.Interaction):
     job = random.choice(WORK_JOBS)
     new_balance = update_balance(interaction.user.id, tokens)
     cooldowns["work"][str(interaction.user.id)] = datetime.now().isoformat()
-    save_data()
+    await save_data()
     
     embed = discord.Embed(title="💼 Work Complete!", color=0x4CAF50)
     embed.add_field(name="Job", value=f"You {job}", inline=False)
@@ -416,7 +527,7 @@ async def crime(interaction: discord.Interaction):
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     cooldowns["crime"][str(interaction.user.id)] = datetime.now().isoformat()
-    save_data()
+    await save_data()
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -445,7 +556,7 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
         return
 
-    win_chance = 50.0  # 55% chance to win
+    win_chance = 50.0  # 50% chance to win
     random_number = random.uniform(0, 100)
     won = random_number <= win_chance
     
@@ -469,7 +580,7 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     set_short_cooldown(interaction.user.id, "coinflip")
-    save_data()
+    await save_data()
     
     await log_action(
         "COINFLIP",
@@ -520,7 +631,7 @@ class DuelAcceptView(discord.ui.View):
         
         update_balance(winner_id, self.amount)
         update_balance(loser_id, -self.amount)
-        save_data()
+        await save_data()
         
         winner = bot.get_user(winner_id)
         loser = bot.get_user(loser_id)
@@ -635,7 +746,7 @@ async def duel(interaction: discord.Interaction, user: discord.Member, amount: i
     view = DuelAcceptView(interaction.user.id, user.id, amount)
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.tree.command(name="gift", description="Gift tokens to another user")
+@bot.tree.command(name="gift", description="Gift tokens to another user (max 3k per day)")
 async def gift(interaction: discord.Interaction, user: discord.Member, amount: int):
     if not can_use_short_cooldown(interaction.user.id, "gift", 3):
         await interaction.response.send_message("⏰ Please wait 3 seconds between gifts!", ephemeral=True)
@@ -643,6 +754,10 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
     
     if amount <= 0:
         await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    if amount > 3000:
+        await interaction.response.send_message("❌ You can only gift up to 3,000 tokens per day!", ephemeral=True)
         return
     
     if user.id == interaction.user.id:
@@ -653,6 +768,21 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
         await interaction.response.send_message("❌ Can't gift to bots!", ephemeral=True)
         return
     
+    # Check daily gift limit
+    user_id = str(interaction.user.id)
+    today = datetime.now().date().isoformat()
+    
+    if user_id not in giveaway_daily_totals:
+        giveaway_daily_totals[user_id] = {}
+    
+    if today not in giveaway_daily_totals[user_id]:
+        giveaway_daily_totals[user_id][today] = 0
+    
+    if giveaway_daily_totals[user_id][today] + amount > 3000:
+        remaining = 3000 - giveaway_daily_totals[user_id][today]
+        await interaction.response.send_message(f"❌ You can only gift {remaining:,} more tokens today!", ephemeral=True)
+        return
+    
     giver_balance = get_user_balance(interaction.user.id)
     if giver_balance < amount:
         await interaction.response.send_message(f"❌ Need **{amount - giver_balance:,}** more tokens!", ephemeral=True)
@@ -660,8 +790,9 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
     
     update_balance(interaction.user.id, -amount)
     update_balance(user.id, amount)
+    giveaway_daily_totals[user_id][today] += amount
     set_short_cooldown(interaction.user.id, "gift")
-    save_data()
+    await save_data()
     
     await log_action(
         "GIFT",
@@ -672,7 +803,8 @@ async def gift(interaction: discord.Interaction, user: discord.Member, amount: i
         fields=[
             {"name": "Giver", "value": interaction.user.mention, "inline": True},
             {"name": "Receiver", "value": user.mention, "inline": True},
-            {"name": "Amount", "value": f"{amount:,} 🪙", "inline": True}
+            {"name": "Amount", "value": f"{amount:,} 🪙", "inline": True},
+            {"name": "Daily Total", "value": f"{giveaway_daily_totals[user_id][today]:,}/3,000 🪙", "inline": True}
         ]
     )
     
@@ -701,7 +833,7 @@ class PurchaseConfirmView(discord.ui.View):
             return
         
         new_balance = update_balance(interaction.user.id, -self.item['price'])
-        save_data()
+        await save_data()
         
         # Log the purchase
         await log_purchase(interaction.user, self.item['name'], self.item['price'])
@@ -825,7 +957,7 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
         similar = [i['name'] for i in shop_data if item_name.lower() in i['name'].lower()]
         error_msg = f"❌ Item **{item_name}** not found!"
         if similar:
-            error_msg += f"\n\nDid you mean: {', '.join(similar[:3])}"
+            error_msg += f"\n\nDid you mean: {', '.join(similar[:3])}
         await interaction.response.send_message(error_msg, ephemeral=True)
         return
     
@@ -845,7 +977,7 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
     # Purchase successful
     new_balance = update_balance(interaction.user.id, -total_cost)
     set_short_cooldown(interaction.user.id, "buy")
-    save_data()
+    await save_data()
     
     # Log the purchase
     await log_purchase(interaction.user, item['name'], item['price'], quantity)
@@ -853,7 +985,7 @@ async def buy(interaction: discord.Interaction, item_name: str, quantity: int = 
     embed = discord.Embed(title="✅ Purchase Successful!", color=0x00ff00)
     embed.add_field(name="Item", value=item['name'], inline=True)
     embed.add_field(name="Quantity", value=str(quantity), inline=True)
-    embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
+     embed.add_field(name="Total Cost", value=f"{total_cost:,} 🪙", inline=True)
     embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
     
     if item.get('description'):
@@ -872,6 +1004,10 @@ class AddItemModal(discord.ui.Modal):
     description = discord.ui.TextInput(label="Description", required=False, style=discord.TextStyle.long)
     
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+            return
+            
         try:
             price_val = int(self.price.value)
             if price_val <= 0:
@@ -893,7 +1029,7 @@ class AddItemModal(discord.ui.Modal):
         }
         
         shop_data.append(new_item)
-        save_data()
+        await save_data()
         
         # Log shop item addition
         await log_action(
@@ -925,6 +1061,10 @@ class UpdateItemModal(discord.ui.Modal):
     description = discord.ui.TextInput(label="New Description (optional)", required=False, style=discord.TextStyle.long)
     
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+            return
+            
         try:
             item_idx = int(self.item_number.value) - 1
             if item_idx < 0 or item_idx >= len(shop_data):
@@ -949,13 +1089,13 @@ class UpdateItemModal(discord.ui.Modal):
                     return
                 shop_data[item_idx]['price'] = new_price
             except:
-                await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
                 return
         
         if self.description.value.strip():
             shop_data[item_idx]['description'] = self.description.value.strip()
         
-        save_data()
+        await save_data()
         
         # Log shop item update
         await log_action(
@@ -985,6 +1125,10 @@ class DeleteItemModal(discord.ui.Modal):
     confirmation = discord.ui.TextInput(label="Type 'DELETE' to confirm", placeholder="This cannot be undone!")
     
     async def on_submit(self, interaction: discord.Interaction):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+            return
+            
         if self.confirmation.value.upper() != "DELETE":
             await interaction.response.send_message("❌ You must type 'DELETE' to confirm!", ephemeral=True)
             return
@@ -999,7 +1143,7 @@ class DeleteItemModal(discord.ui.Modal):
             return
         
         deleted_item = shop_data.pop(item_idx)
-        save_data()
+        await save_data()
         
         # Log shop item deletion
         await log_action(
@@ -1108,8 +1252,8 @@ class ResetConfirmView(discord.ui.View):
         # Reset all data
         global user_data, cooldowns
         user_data.clear()
-        cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}}
-        save_data()
+        cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
+        await save_data()
         
         success_embed = discord.Embed(
             title="✅ Data Reset Complete",
@@ -1296,7 +1440,7 @@ async def addtoken(interaction: discord.Interaction, user: discord.Member, amoun
         return
     
     new_balance = update_balance(user.id, amount)
-    save_data()
+    await save_data()
     
     await log_action(
         "ADD_TOKENS",
@@ -1311,7 +1455,7 @@ async def addtoken(interaction: discord.Interaction, user: discord.Member, amoun
         ]
     )
     
-    embed = discord.Embed(title="✅ Tokens Added", color=0x00ff00)
+    embed = discord.Emembed(title="✅ Tokens Added", color=0x00ff00)
     embed.add_field(name="User", value=user.mention, inline=True)
     embed.add_field(name="Added", value=f"{amount:,} 🪙", inline=True)
     embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
@@ -1337,7 +1481,7 @@ async def removetoken(interaction: discord.Interaction, user: discord.Member, am
         return
     
     new_balance = update_balance(user.id, -amount)
-    save_data()
+    await save_data()
     
     await log_action(
         "REMOVE_TOKENS",
@@ -1356,6 +1500,390 @@ async def removetoken(interaction: discord.Interaction, user: discord.Member, am
     embed.add_field(name="User", value=user.mention, inline=True)
     embed.add_field(name="Removed", value=f"{amount:,} 🪙", inline=True)
     embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# Giveaway entry button
+class GiveawayEnterView(discord.ui.View):
+    def __init__(self, giveaway_id):
+        super().__init__(timeout=25)  # 25 second timeout
+        self.giveaway_id = giveaway_id
+    
+    @discord.ui.button(label="🎉 Enter Giveaway", style=discord.ButtonStyle.green, emoji="🎉")
+    async def enter_giveaway(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.giveaway_id not in active_giveaways:
+            await interaction.response.send_message("❌ This giveaway has ended!", ephemeral=True)
+            return
+        
+        giveaway = active_giveaways[self.giveaway_id]
+        
+        # Check if user already entered
+        if str(interaction.user.id) in giveaway['entries']:
+            await interaction.response.send_message("❌ You've already entered this giveaway!", ephemeral=True)
+            return
+        
+        # Calculate entries based on roles
+        entries = 1  # Base entry
+        
+        # Add bonus entries for special roles
+        for role_id, bonus_entries in PRIORITY_ROLES.items():
+            if any(role.id == role_id for role in interaction.user.roles):
+                entries += bonus_entries
+        
+        # Add user to entries
+        giveaway['entries'][str(interaction.user.id)] = entries
+        giveaway['total_entries'] += entries
+        
+        await save_data()
+        
+        role_bonus_text = ""
+        for role_id, bonus_entries in PRIORITY_ROLES.items():
+            if any(role.id == role_id for role in interaction.user.roles):
+                role_bonus_text += f"• <@&{role_id}>: +{bonus_entries} entries\n"
+        
+        if role_bonus_text:
+            bonus_message = f"\n**Role Bonuses:**\n{role_bonus_text}"
+        else:
+            bonus_message = ""
+        
+        await interaction.response.send_message(
+            f"✅ You've entered the giveaway with **{entries}** entries! Good luck!{bonus_message}",
+            ephemeral=True
+        )
+
+@bot.tree.command(name="giveaway", description="Start a token giveaway (25 seconds)")
+async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
+    # Check cooldown
+    can_use, next_use = can_use_command(interaction.user.id, "giveaway", 1)
+    
+    if not can_use:
+        time_left = format_time(next_use)
+        await interaction.response.send_message(f"⏰ Please wait **{time_left}** before starting another giveaway!", ephemeral=True)
+        return
+    
+    # Validate parameters
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    if amount > 10000:
+        await interaction.response.send_message("❌ Maximum giveaway amount is 10,000 tokens!", ephemeral=True)
+        return
+    
+    if winners < 1 or winners > 12:
+        await interaction.response.send_message("❌ Number of winners must be between 1 and 12!", ephemeral=True)
+        return
+    
+    # Check daily giveaway limit (50k per user)
+    user_id = str(interaction.user.id)
+    today = datetime.now().date().isoformat()
+    
+    if user_id not in giveaway_daily_totals:
+        giveaway_daily_totals[user_id] = {}
+    
+    if today not in giveaway_daily_totals[user_id]:
+        giveaway_daily_totals[user_id][today] = 0
+    
+    if giveaway_daily_totals[user_id][today] + amount > 50000:
+        remaining = 50000 - giveaway_daily_totals[user_id][today]
+        await interaction.response.send_message(
+            f"❌ You can only giveaway {remaining:,} more tokens today! (50k daily limit)",
+            ephemeral=True
+        )
+        return
+    
+    # Check if user has enough tokens
+    balance = get_user_balance(interaction.user.id)
+    if balance < amount:
+        await interaction.response.send_message(f"❌ You need **{amount - balance:,}** more tokens to start this giveaway!", ephemeral=True)
+        return
+    
+    # Deduct tokens from user
+    new_balance = update_balance(interaction.user.id, -amount)
+    giveaway_daily_totals[user_id][today] += amount
+    cooldowns["giveaway"][str(interaction.user.id)] = datetime.now().isoformat()
+    
+    # Create giveaway
+    giveaway_id = f"{interaction.user.id}_{int(time.time())}"
+    prize_per_winner = amount // winners
+    
+    active_giveaways[giveaway_id] = {
+        'creator': interaction.user.id,
+        'amount': amount,
+        'winners': winners,
+        'prize_per_winner': prize_per_winner,
+        'entries': {},
+        'total_entries': 0,
+        'created_at': datetime.now().isoformat(),
+        'end_time': (datetime.now() + timedelta(seconds=25)).isoformat()
+    }
+    
+    await save_data()
+    
+    # Create embed with improved UI
+    embed = discord.Embed(
+        title="🎉 TOKEN GIVEAWAY 🎉",
+        description=f"Hosted by {interaction.user.mention}",
+        color=0xFFD700,
+        timestamp=datetime.now()
+    )
+    
+    # Add thumbnail
+    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1125274830004781156.webp?size=96&quality=lossless")
+    
+    # Main prize info
+    embed.add_field(
+        name="🏆 TOTAL PRIZE", 
+        value=f"**{amount:,}** 🪙", 
+        inline=True
+    )
+    embed.add_field(
+        name="👑 WINNERS", 
+        value=f"**{winners}** lucky winners", 
+        inline=True
+    )
+    embed.add_field(
+        name="💰 PRIZE PER WINNER", 
+        value=f"**{prize_per_winner:,}** 🪙", 
+        inline=True
+    )
+    
+    # Time and entries
+    embed.add_field(
+        name="⏰ TIME REMAINING", 
+        value="**25 seconds**", 
+        inline=True
+    )
+    embed.add_field(
+        name="🎫 ENTRIES", 
+        value="**0** entries", 
+        inline=True
+    )
+    embed.add_field(
+        name="🎲 YOUR CHANCES", 
+        value="Enter to see!", 
+        inline=True
+    )
+    
+    # Role bonus section
+    role_bonus_text = "\n".join([f"<@&{role_id}>: **+{bonus} entries**" for role_id, bonus in PRIORITY_ROLES.items()])
+    if role_bonus_text:
+        embed.add_field(
+            name="🌟 ROLE BONUSES", 
+            value=role_bonus_text, 
+            inline=False
+        )
+    
+    # Footer with instructions
+    embed.set_footer(
+        text="Click the button below to enter! • Ends in 25 seconds",
+        icon_url="https://cdn.discordapp.com/emojis/1125272129399365632.webp?size=96&quality=lossless"
+    )
+    
+    view = GiveawayEnterView(giveaway_id)
+    message = await interaction.response.send_message(embed=embed, view=view)
+    
+    # Update the giveaway message every 5 seconds with progress
+    async def update_giveaway_message():
+        for i in range(5):  # 5 updates (25 seconds total)
+            await asyncio.sleep(5)
+            
+            if giveaway_id not in active_giveaways:
+                break
+                
+            giveaway = active_giveaways[giveaway_id]
+            time_left = 20 - (i * 5)
+            
+            # Update embed
+            updated_embed = discord.Embed(
+                title="🎉 TOKEN GIVEAWAY 🎉",
+                description=f"Hosted by {interaction.user.mention}",
+                color=0xFFD700,
+                timestamp=datetime.now()
+            )
+            
+            updated_embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1125274830004781156.webp?size=96&quality=lossless")
+            updated_embed.add_field(name="🏆 TOTAL PRIZE", value=f"**{amount:,}** 🪙", inline=True)
+            updated_embed.add_field(name="👑 WINNERS", value=f"**{winners}** lucky winners", inline=True)
+            updated_embed.add_field(name="💰 PRIZE PER WINNER", value=f"**{prize_per_winner:,}** 🪙", inline=True)
+            updated_embed.add_field(name="⏰ TIME REMAINING", value=f"**{time_left} seconds**", inline=True)
+            updated_embed.add_field(name="🎫 ENTRIES", value=f"**{giveaway['total_entries']:,}** entries", inline=True)
+            
+            # Calculate approximate chances
+            if giveaway['total_entries'] > 0:
+                approx_chance = min(100, round((winners / giveaway['total_entries']) * 100, 1))
+                updated_embed.add_field(name="🎲 YOUR CHANCES", value=f"**~{approx_chance}%** chance to win", inline=True)
+            else:
+                updated_embed.add_field(name="🎲 YOUR CHANCES", value="Be the first to enter!", inline=True)
+            
+            if role_bonus_text:
+                updated_embed.add_field(name="🌟 ROLE BONUSES", value=role_bonus_text, inline=False)
+            
+            updated_embed.set_footer(
+                text=f"Click the button below to enter! • Ends in {time_left} seconds",
+                icon_url="https://cdn.discordapp.com/emojis/1125272129399365632.webp?size=96&quality=lossless"
+            )
+            
+            try:
+                await interaction.edit_original_response(embed=updated_embed, view=view)
+            except:
+                break
+    
+    # Start the update task
+    asyncio.create_task(update_giveaway_message())
+    
+    # Wait for giveaway to end
+    await asyncio.sleep(25)
+    
+    # End the giveaway
+    if giveaway_id in active_giveaways:
+        giveaway = active_giveaways[giveaway_id]
+        
+        if giveaway['total_entries'] > 0:
+            # Select winners
+            all_entries = []
+            for user_id, entries in giveaway['entries'].items():
+                all_entries.extend([user_id] * entries)
+            
+            selected_winners = random.sample(all_entries, min(giveaway['winners'], len(set(all_entries))))
+            unique_winners = list(set(selected_winners))
+            
+            # Distribute prizes
+            winner_mentions = []
+            for winner_id in unique_winners:
+                try:
+                    winner = await bot.fetch_user(int(winner_id))
+                    update_balance(winner.id, giveaway['prize_per_winner'])
+                    winner_mentions.append(winner.mention)
+                except:
+                    continue
+            
+            # Create results embed with improved UI
+            result_embed = discord.Embed(
+                title="🎊 GIVEAWAY ENDED 🎊",
+                description=f"Hosted by {interaction.user.mention}",
+                color=0x00ff00,
+                timestamp=datetime.now()
+            )
+            
+            result_embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1125272129399365632.webp?size=96&quality=lossless")
+            
+            # Results summary
+            result_embed.add_field(name="🏆 TOTAL PRIZE", value=f"**{giveaway['amount']:,}** 🪙", inline=True)
+            result_embed.add_field(name="👑 WINNERS", value=f"**{len(unique_winners)}/{giveaway['winners']}**", inline=True)
+            result_embed.add_field(name="💰 PRIZE PER WINNER", value=f"**{giveaway['prize_per_winner']:,}** 🪙", inline=True)
+            result_embed.add_field(name="🎫 TOTAL ENTRIES", value=f"**{giveaway['total_entries']:,}**", inline=True)
+            result_embed.add_field(name="👥 PARTICIPANTS", value=f"**{len(giveaway['entries'])}**", inline=True)
+            result_embed.add_field(name="⏰ DURATION", value="**25 seconds**", inline=True)
+            
+            # Winners list
+            if winner_mentions:
+                winners_text = "\n".join(winner_mentions)
+                if len(winners_text) > 1024:
+                    winners_text = f"🎉 {len(unique_winners)} winners selected!"
+                result_embed.add_field(name="🎊 LUCKY WINNERS", value=winners_text, inline=False)
+            
+            result_embed.set_footer(
+                text="Congratulations to the winners! • Tokens have been distributed",
+                icon_url="https://cdn.discordapp.com/emojis/1125274830004781156.webp?size=96&quality=lossless"
+            )
+            
+            # Log the giveaway
+            await log_action(
+                "GIVEAWAY",
+                "🎉 Giveaway Completed",
+                f"**{interaction.user.mention}** hosted a giveaway of **{giveaway['amount']:,} tokens**",
+                color=0xFFD700,
+                user=interaction.user,
+                fields=[
+                    {"name": "Total Prize", "value": f"{giveaway['amount']:,} 🪙", "inline": True},
+                    {"name": "Winners", "value": f"{len(unique_winners)}/{giveaway['winners']}", "inline": True},
+                    {"name": "Prize per Winner", "value": f"{giveaway['prize_per_winner']:,} 🪙", "inline": True},
+                    {"name": "Total Entries", "value": f"{giveaway['total_entries']:,}", "inline": True},
+                    {"name": "Unique Participants", "value": f"{len(giveaway['entries'])}", "inline": True},
+                    {"name": "Winners", "value": "\n".join(winner_mentions) if winner_mentions else "No winners", "inline": False}
+                ]
+            )
+            
+            # Update the message
+            try:
+                await interaction.edit_original_response(embed=result_embed, view=None)
+            except:
+                pass
+            
+        else:
+            # No entries, refund the creator
+            update_balance(interaction.user.id, giveaway['amount'])
+            giveaway_daily_totals[user_id][today] -= giveaway['amount']
+            
+            refund_embed = discord.Embed(
+                title="🎉 GIVEAWAY ENDED",
+                description="No one entered the giveaway. Tokens have been refunded.",
+                color=0xff4444
+            )
+            
+            refund_embed.set_footer(text="Better luck next time!")
+            
+            try:
+                await interaction.edit_original_response(embed=refund_embed, view=None)
+            except:
+                pass
+        
+        # Remove giveaway from active list
+        del active_giveaways[giveaway_id]
+        await save_data()
+
+@bot.tree.command(name="giveawayinfo", description="Check your daily giveaway limits")
+async def giveawayinfo(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    today = datetime.now().date().isoformat()
+    
+    daily_gifted = giveaway_daily_totals.get(user_id, {}).get(today, 0)
+    daily_giveaway = giveaway_daily_totals.get(user_id, {}).get(today, 0)
+    
+    embed = discord.Embed(
+        title="📊 Giveaway Information",
+        description="Your daily limits and usage",
+        color=0x0099ff,
+        timestamp=datetime.now()
+    )
+    
+    embed.add_field(
+        name="🎁 Daily Gift Limit", 
+        value=f"**{daily_gifted:,}/3,000** 🪙 used today\n*Resets at midnight*", 
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🎉 Daily Giveaway Limit", 
+        value=f"**{daily_giveaway:,}/50,000** 🪙 used today\n*Resets at midnight*", 
+        inline=True
+    )
+    
+    # Calculate time until reset
+    now = datetime.now()
+    next_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    time_until_reset = next_midnight - now
+    hours, remainder = divmod(time_until_reset.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    embed.add_field(
+        name="⏰ Time Until Reset", 
+        value=f"**{hours}h {minutes}m {seconds}s**", 
+        inline=False
+    )
+    
+    # Role bonus info
+    role_bonus_text = "\n".join([f"<@&{role_id}>: +{bonus} entries" for role_id, bonus in PRIORITY_ROLES.items()])
+    if role_bonus_text:
+        embed.add_field(
+            name="🌟 Role Bonuses", 
+            value=role_bonus_text, 
+            inline=False
+        )
+    
+    embed.set_footer(text="Host giveaways to share your wealth!")
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -1378,7 +1906,9 @@ async def about(ctx):
             "`/crime` - Risky crime for tokens (1h cooldown)\n"
             "`/coinflip <amount> <heads/tails>` - Bet tokens on coinflip\n"
             "`/duel <user> <amount>` - Challenge someone to coinflip\n"
-            "`/gift <user> <amount>` - Gift tokens to another user"
+            "`/gift <user> <amount>` - Gift tokens to another user\n"
+            "`/giveaway <amount> <winners>` - Start a token giveaway\n"
+            "`/giveawayinfo` - Check your daily limits"
         ),
         inline=False
     )
@@ -1439,6 +1969,34 @@ async def about(ctx):
         inline=False
     )
     
+    # Giveaway Info
+    embed.add_field(
+        name="🎉 Giveaway System",
+        value=(
+            "• Anyone can host giveaways\n"
+            "• Maximum prize: 10,000 tokens per giveaway\n"
+            "• Maximum 50,000 tokens per day per user\n"
+            "• 1-12 winners\n"
+            "• 25 second duration\n"
+            "• Special roles get bonus entries:\n"
+            "  - <@&1410911675351306250>: +7 entries\n"
+            "  - <@&1410911675351306251>: +5 entries\n"
+            "  - <@&1410911675351306252>: +3 entries"
+        ),
+        inline=False
+    )
+    
+    # Gift Limits
+    embed.add_field(
+        name="🎁 Gift Limits",
+        value=(
+            "• Maximum 3,000 tokens per day per user\n"
+            "• 3 second cooldown between gifts\n"
+            "• Check `/giveawayinfo` for your daily usage"
+        ),
+        inline=False
+    )
+    
     # Tips
     embed.add_field(
         name="💡 Tips",
@@ -1447,7 +2005,8 @@ async def about(ctx):
             "• `/work` is safe but has a 3-hour cooldown\n"
             "• `/crime` is risky but can give more tokens\n"
             "• Chat regularly to earn passive tokens\n"
-            "• Check `/leaderboard` to see your ranking"
+            "• Check `/leaderboard` to see your ranking\n"
+            "• Host giveaways to share your wealth!"
         ),
         inline=False
     )
@@ -1468,6 +2027,16 @@ if __name__ == "__main__":
     
     try:
         print("🔑 Token found, connecting to Discord...")
+        # Register cleanup handler
+        import signal
+        def handle_exit(signum, frame):
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(force_save_on_exit())
+            sys.exit(0)
+            
+        signal.signal(signal.SIGTERM, handle_exit)
+        signal.signal(signal.SIGINT, handle_exit)
+        
         bot.run(TOKEN, log_handler=None)
     except discord.LoginFailure:
         print("❌ Invalid bot token!")
@@ -1475,6 +2044,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Error starting bot: {e}")
         sys.exit(1)
-    finally:
-        print("🔄 Bot shutting down...")
-        force_save_on_exit()
