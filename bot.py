@@ -1089,8 +1089,9 @@ class UpdateItemModal(discord.ui.Modal):
                     return
                 shop_data[item_idx]['price'] = new_price
             except:
-            await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+                await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
                 return
+            
         
         if self.description.value.strip():
             shop_data[item_idx]['description'] = self.description.value.strip()
@@ -1455,7 +1456,7 @@ async def addtoken(interaction: discord.Interaction, user: discord.Member, amoun
         ]
     )
     
-    embed = discord.Emembed(title="✅ Tokens Added", color=0x00ff00)
+    embed = discord.Embed(title="✅ Tokens Added", color=0x00ff00)
     embed.add_field(name="User", value=user.mention, inline=True)
     embed.add_field(name="Added", value=f"{amount:,} 🪙", inline=True)
     embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
