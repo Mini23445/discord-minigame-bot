@@ -29,9 +29,9 @@ PURCHASE_LOG_CHANNEL_ID = 1413885597826813972  # Replace with your purchase log 
 
 # Roles that get extra entries in giveaways - REPLACE THESE WITH YOUR ACTUAL ROLE IDs
 PRIORITY_ROLES = {
-    1410911675351306250: 7,  # Replace with your highest priority role ID
-    1410911675351306251: 5,  # Replace with your medium priority role ID
-    1410911675351306252: 3,  # Replace with your low priority role ID
+    1410917252190179369: 7,  # Replace with your highest priority role ID
+    1410917163933503521: 5,  # Replace with your medium priority role ID
+    1410917146459897928: 3,  # Replace with your low priority role ID
 }
 
 # Data storage
