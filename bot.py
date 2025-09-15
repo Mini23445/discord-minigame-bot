@@ -1256,7 +1256,7 @@ async def addshop(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Admin only!", ephemeral=True)
         return
     
-    embed = discord.Emebed(title="🛍️ Shop Management", color=0xff9900)
+    embed = discord.Embed(title="🛍️ Shop Management", color=0xff9900)
     embed.add_field(name="📊 Stats", value=f"**Items:** {len(shop_data)}\n**Status:** {'Active' if shop_data else 'Empty'}", inline=True)
     
     if shop_data:
