@@ -1552,20 +1552,23 @@ class GiveawayEnterView(discord.ui.View):
             ephemeral=True
         )
 
-@bot.tree.command(name="giveaway", description="Start a token giveaway (15 seconds)")
+@bot.tree.command(name="giveaway", description="Start a token giveaway (25 seconds)")
 async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
     # Check cooldown
-   if not can_use_short_cooldown(interaction.user.id, "giveaway", 15):
-    await interaction.response.send_message("⏰ Please wait 15 seconds before starting another giveaway!", ephemeral=True)
-    return
+    can_use, next_use = can_use_command(interaction.user.id, "giveaway", 1)
     
-# Validate parameters
-if amount < 50:
-    await interaction.response.send_message("❌ Giveaway amount must be at least 50 tokens!", ephemeral=True)
-    return
+    if not can_use:
+        time_left = format_time(next_use)
+        await interaction.response.send_message(f"⏰ Please wait **{time_left}** before starting another giveaway!", ephemeral=True)
+        return
     
-    if amount > 5000:
-        await interaction.response.send_message("❌ Maximum giveaway amount is 5,000 tokens!", ephemeral=True)
+    # Validate parameters
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+        return
+    
+    if amount > 10000:
+        await interaction.response.send_message("❌ Maximum giveaway amount is 10,000 tokens!", ephemeral=True)
         return
     
     if winners < 1 or winners > 12:
@@ -1599,7 +1602,7 @@ if amount < 50:
     # Deduct tokens from user
     new_balance = update_balance(interaction.user.id, -amount)
     giveaway_daily_totals[user_id][today] += amount
-    set_short_cooldown(interaction.user.id, "giveaway")
+    cooldowns["giveaway"][str(interaction.user.id)] = datetime.now().isoformat()
     
     # Create giveaway
     giveaway_id = f"{interaction.user.id}_{int(time.time())}"
