@@ -1556,7 +1556,7 @@ class GiveawayEnterView(discord.ui.View):
 async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
     # Check cooldown
     if not can_use_short_cooldown(interaction.user.id, "giveaway", 15):
-    await interaction.response.send_message("⏰ Please wait **{time_left}** before starting another giveaway!", ephemeral=True)
+    await interaction.response.send_message("⏰ Please wait 15 seconds before starting another giveaway!", ephemeral=True)
     return
     
 # Validate parameters
