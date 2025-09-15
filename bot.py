@@ -22,17 +22,16 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Configuration
-ADMIN_ROLE_ID = 1410911675351306250
-LOG_CHANNEL_ID = 1413818486404415590
-PURCHASE_LOG_CHANNEL_ID = 1413885597826813972
+# Configuration - REPLACE THESE IDs WITH YOUR ACTUAL SERVER IDs
+ADMIN_ROLE_ID = 1410911675351306250  # Replace with your admin role ID
+LOG_CHANNEL_ID = 1413818486404415590  # Replace with your log channel ID
+PURCHASE_LOG_CHANNEL_ID = 1413885597826813972  # Replace with your purchase log channel ID
 
-# Roles that get extra entries in giveaways (customize these IDs for your server)
-# Format: {role_id: extra_entries}
+# Roles that get extra entries in giveaways - REPLACE THESE WITH YOUR ACTUAL ROLE IDs
 PRIORITY_ROLES = {
-    1410917252190179369: 7,  # Highest priority role - 7 extra entries
-    1410917163933503521: 5,  # Medium priority role - 5 extra entries  
-    1410917146459897928: 3,  # Low priority role - 3 extra entries
+    1410911675351306250: 7,  # Replace with your highest priority role ID
+    1410911675351306251: 5,  # Replace with your medium priority role ID
+    1410911675351306252: 3,  # Replace with your low priority role ID
 }
 
 # Data storage
@@ -70,8 +69,8 @@ WORK_JOBS = [
     "helped people move", "worked landscaping", "cleaned office buildings", "worked at car wash",
     "did home repairs", "worked at recycling center", "unloaded freight trucks",
     "worked factory assembly line", "cleaned windows", "delivered for DoorDash",
-    "drove for Uber", "worked at movie theater",
-    "worked at library", "tutored kids", "walked dogs", "house-sat", "baby-sat"
+    "drove for Uber", "worked at movie theater", "worked at gym front desk",
+    "worked at library", "tutored kids", "walked dogs", "pet-sat", "house-sat", "baby-sat"
 ]
 
 CRIME_ACTIVITIES = [
@@ -100,17 +99,43 @@ CRIME_ACTIVITIES = [
     "used expired coupon"
 ]
 
+async def create_default_files():
+    """Create default data files if they don't exist"""
+    default_data = {
+        USER_DATA_FILE: {},
+        SHOP_DATA_FILE: [],
+        COOLDOWNS_FILE: {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}},
+        GIVEAWAYS_FILE: {},
+        DAILY_GIVEAWAYS_FILE: {}
+    }
+    
+    for file_path, default_content in default_data.items():
+        if not os.path.exists(file_path):
+            try:
+                async with aiofiles.open(file_path, 'w') as f:
+                    await f.write(json.dumps(default_content, indent=2))
+                print(f"✅ Created default {file_path}")
+            except Exception as e:
+                print(f"⚠️ Error creating {file_path}: {e}")
+
 async def load_data():
-    """Load all data from files"""
+    """Load all data from files with error handling"""
     global user_data, shop_data, cooldowns, active_giveaways, giveaway_daily_totals
+    
+    # First create default files if they don't exist
+    await create_default_files()
     
     try:
         # Load user data
         if os.path.exists(USER_DATA_FILE):
             async with aiofiles.open(USER_DATA_FILE, 'r') as f:
                 contents = await f.read()
-                user_data = json.loads(contents)
-                print(f"✅ Loaded user data for {len(user_data)} users")
+                if contents.strip():
+                    user_data = json.loads(contents)
+                    print(f"✅ Loaded user data for {len(user_data)} users")
+                else:
+                    print("ℹ️ User data file is empty, starting fresh")
+                    user_data = {}
         else:
             print("ℹ️ No user data file found, starting fresh")
             user_data = {}
@@ -119,8 +144,12 @@ async def load_data():
         if os.path.exists(SHOP_DATA_FILE):
             async with aiofiles.open(SHOP_DATA_FILE, 'r') as f:
                 contents = await f.read()
-                shop_data = json.loads(contents)
-                print(f"✅ Loaded {len(shop_data)} shop items")
+                if contents.strip():
+                    shop_data = json.loads(contents)
+                    print(f"✅ Loaded {len(shop_data)} shop items")
+                else:
+                    print("ℹ️ Shop data file is empty, starting fresh")
+                    shop_data = []
         else:
             print("ℹ️ No shop data file found, starting fresh")
             shop_data = []
@@ -129,8 +158,12 @@ async def load_data():
         if os.path.exists(COOLDOWNS_FILE):
             async with aiofiles.open(COOLDOWNS_FILE, 'r') as f:
                 contents = await f.read()
-                cooldowns = json.loads(contents)
-                print("✅ Loaded cooldown data")
+                if contents.strip():
+                    cooldowns = json.loads(contents)
+                    print("✅ Loaded cooldown data")
+                else:
+                    print("ℹ️ Cooldowns file is empty, starting fresh")
+                    cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
         else:
             print("ℹ️ No cooldowns file found, starting fresh")
             cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
@@ -139,8 +172,12 @@ async def load_data():
         if os.path.exists(GIVEAWAYS_FILE):
             async with aiofiles.open(GIVEAWAYS_FILE, 'r') as f:
                 contents = await f.read()
-                active_giveaways = json.loads(contents)
-                print(f"✅ Loaded {len(active_giveaways)} active giveaways")
+                if contents.strip():
+                    active_giveaways = json.loads(contents)
+                    print(f"✅ Loaded {len(active_giveaways)} active giveaways")
+                else:
+                    print("ℹ️ Giveaways file is empty, starting fresh")
+                    active_giveaways = {}
         else:
             print("ℹ️ No giveaways file found, starting fresh")
             active_giveaways = {}
@@ -149,12 +186,25 @@ async def load_data():
         if os.path.exists(DAILY_GIVEAWAYS_FILE):
             async with aiofiles.open(DAILY_GIVEAWAYS_FILE, 'r') as f:
                 contents = await f.read()
-                giveaway_daily_totals = json.loads(contents)
-                print("✅ Loaded daily giveaway totals")
+                if contents.strip():
+                    giveaway_daily_totals = json.loads(contents)
+                    print("✅ Loaded daily giveaway totals")
+                else:
+                    print("ℹ️ Daily giveaways file is empty, starting fresh")
+                    giveaway_daily_totals = {}
         else:
             print("ℹ️ No daily giveaways file found, starting fresh")
             giveaway_daily_totals = {}
             
+    except json.JSONDecodeError as e:
+        print(f"⚠️ JSON decode error loading data: {e}")
+        print("ℹ️ Starting with fresh data due to corrupted files")
+        # Initialize empty data structures
+        user_data = {}
+        shop_data = []
+        cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
+        active_giveaways = {}
+        giveaway_daily_totals = {}
     except Exception as e:
         print(f"⚠️ Error loading data: {e}")
         # Initialize empty data structures if loading fails
@@ -929,7 +979,7 @@ async def shop(interaction: discord.Interaction):
             items_text += f"    *{item['description'][:50]}{'...' if len(item['description']) > 50 else ''}*\n"
         items_text += "\n"
     
-    embed.add_field(name="Available Items", value=items_text, inline=False)
+        embed.add_field(name="Available Items", value=items_text, inline=False)
     embed.set_footer(text="Click the buttons below to purchase items!")
     
     view = ShopView(balance)
@@ -1091,7 +1141,6 @@ class UpdateItemModal(discord.ui.Modal):
             except:
                 await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
                 return
-            
         
         if self.description.value.strip():
             shop_data[item_idx]['description'] = self.description.value.strip()
@@ -1113,7 +1162,7 @@ class UpdateItemModal(discord.ui.Modal):
         )
         
         embed = discord.Embed(title="✅ Item Updated!", color=0x0099ff)
-        embed.add_field(name="Item", value=shop_data[item_idx]['name'], inline=True)
+        embed.add_field(name="Item", value=shop_data[item_idx['name'], inline=True)
         embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=True)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1207,7 +1256,7 @@ async def addshop(interaction: discord.Interaction):
         await interaction.response.send_message("❌ Admin only!", ephemeral=True)
         return
     
-    embed = discord.Embed(title="🛍️ Shop Management", color=0xff9900)
+    embed = discord.Emembed(title="🛍️ Shop Management", color=0xff9900)
     embed.add_field(name="📊 Stats", value=f"**Items:** {len(shop_data)}\n**Status:** {'Active' if shop_data else 'Empty'}", inline=True)
     
     if shop_data:
@@ -1504,6 +1553,54 @@ async def removetoken(interaction: discord.Interaction, user: discord.Member, am
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+# NEW COMMAND: Add tokens to all members with a specific role
+@bot.tree.command(name="addalltokens", description="Add tokens to all members with a specific role (Admin only)")
+async def addalltokens(interaction: discord.Interaction, amount: int, role: discord.Role):
+    if not is_admin(interaction.user):
+        await interaction.response.send_message("❌ Admin only!", ephemeral=True)
+        return
+    
+    if amount <= 0:
+        await interaction.response.send_message("❌ Amount must be positive!", ephemeral=True)
+        return
+    
+    # Get all members with the role
+    members_with_role = [member for member in interaction.guild.members if role in member.roles and not member.bot]
+    
+    if not members_with_role:
+        await interaction.response.send_message(f"❌ No members found with the role {role.mention}!", ephemeral=True)
+        return
+    
+    # Add tokens to all members
+    updated_count = 0
+    for member in members_with_role:
+        update_balance(member.id, amount)
+        updated_count += 1
+    
+    await save_data()
+    
+    await log_action(
+        "ADD_ALL_TOKENS",
+        "💰 Tokens Added to Role",
+        f"**{interaction.user.mention}** added **{amount:,} tokens** to all members with {role.mention}",
+        color=0x00ff00,
+        user=interaction.user,
+        fields=[
+            {"name": "Role", "value": role.mention, "inline": True},
+            {"name": "Amount Added", "value": f"{amount:,} 🪙", "inline": True},
+            {"name": "Members Affected", "value": f"{updated_count}", "inline": True},
+            {"name": "Total Distributed", "value": f"{amount * updated_count:,} 🪙", "inline": True}
+        ]
+    )
+    
+    embed = discord.Embed(title="✅ Tokens Added to Role", color=0x00ff00)
+    embed.add_field(name="Role", value=role.mention, inline=True)
+    embed.add_field(name="Amount", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="Members", value=f"{updated_count}", inline=True)
+    embed.add_field(name="Total Distributed", value=f"{amount * updated_count:,} 🪙", inline=True)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 # Giveaway entry button
 class GiveawayEnterView(discord.ui.View):
     def __init__(self, giveaway_id):
@@ -1554,17 +1651,14 @@ class GiveawayEnterView(discord.ui.View):
 
 @bot.tree.command(name="giveaway", description="Start a token giveaway (25 seconds)")
 async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
-    # Check cooldown
-    can_use, next_use = can_use_command(interaction.user.id, "giveaway", 1)
-    
-    if not can_use:
-        time_left = format_time(next_use)
-        await interaction.response.send_message(f"⏰ Please wait **{time_left}** before starting another giveaway!", ephemeral=True)
+    # Check cooldown - NEW: 15 second cooldown for giveaways
+    if not can_use_short_cooldown(interaction.user.id, "giveaway", 15):
+        await interaction.response.send_message("⏰ Please wait 15 seconds before starting another giveaway!", ephemeral=True)
         return
     
-    # Validate parameters
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+    # Validate parameters - NEW: Minimum 50 tokens for giveaway
+    if amount < 50:  # Changed from <= 0 to < 50 for minimum
+        await interaction.response.send_message("❌ Minimum giveaway amount is 50 tokens!", ephemeral=True)
         return
     
     if amount > 10000:
@@ -1602,7 +1696,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
     # Deduct tokens from user
     new_balance = update_balance(interaction.user.id, -amount)
     giveaway_daily_totals[user_id][today] += amount
-    cooldowns["giveaway"][str(interaction.user.id)] = datetime.now().isoformat()
+    set_short_cooldown(interaction.user.id, "giveaway")  # Set 15 second cooldown
     
     # Create giveaway
     giveaway_id = f"{interaction.user.id}_{int(time.time())}"
@@ -1682,7 +1776,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
     )
     
     view = GiveawayEnterView(giveaway_id)
-    message = await interaction.response.send_message(embed=embed, view=view)
+    await interaction.response.send_message(embed=embed, view=view)
     
     # Update the giveaway message every 5 seconds with progress
     async def update_giveaway_message():
@@ -1943,7 +2037,8 @@ async def about(ctx):
                 "`/removetoken <user> <amount>` - Remove tokens from user\n"
                 "`/adminbalance <user>` - Check user's balance\n"
                 "`/addshop` - Manage shop items\n"
-                "`/resetdata <code>` - Reset all user data"
+                "`/resetdata <code>` - Reset all user data\n"
+                "`/addalltokens <amount> <role>` - Add tokens to all members with a role"
             ),
             inline=False
         )
@@ -1975,8 +2070,10 @@ async def about(ctx):
         name="🎉 Giveaway System",
         value=(
             "• Anyone can host giveaways\n"
+            "• Minimum prize: 50 tokens per giveaway\n"
             "• Maximum prize: 10,000 tokens per giveaway\n"
             "• Maximum 50,000 tokens per day per user\n"
+            "• 15 second cooldown between giveaways\n"
             "• 1-12 winners\n"
             "• 25 second duration\n"
             "• Special roles get bonus entries:\n"
