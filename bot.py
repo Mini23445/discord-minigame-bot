@@ -1162,7 +1162,7 @@ class UpdateItemModal(discord.ui.Modal):
         )
         
         embed = discord.Embed(title="✅ Item Updated!", color=0x0099ff)
-        embed.add_field(name="Item", value=shop_data[item_idx['name'], inline=True])
+        embed.add_field(name="Item", value=shop_data[item_idx]['name'], inline=True)
         embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=True)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
