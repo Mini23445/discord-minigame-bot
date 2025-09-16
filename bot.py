@@ -671,7 +671,7 @@ await log_action(
     ]
 )
     
-    await interaction.response.send_message(embed=embed)
+await interaction.response.send_message(embed=embed)
 
 class DuelAcceptView(discord.ui.View):
     def __init__(self, challenger_id, challenged_id, amount):
