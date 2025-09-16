@@ -607,30 +607,29 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
     if not can_use_short_cooldown(interaction.user.id, "coinflip", 5):
         await interaction.response.send_message("⏰ Please wait 5 seconds between coinflips!", ephemeral=True)
         return
-    
-    if amount <= 0:
-        await interaction.response.send_message("❌ Bet amount must be greater than 0!", ephemeral=True)
-        return
-    
-    choice = choice.lower()
-    if choice not in ['heads', 'tails', 'h', 't']:
-        await interaction.response.send_message("❌ Choose 'heads' or 'tails' (or 'h'/'t')!", ephemeral=True)
-        return
-    
-    if choice in ['h', 'heads']:
-        choice = 'heads'
-    else:
-        choice = 'tails'
-    
-    balance = get_user_balance(interaction.user.id)
-    if balance < amount:
-        await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
-        return
+if amount <= 0:
+    await interaction.response.send_message("❌ Bet amount must be greater than 0!", ephemeral=True)
+    return
 
-    won = should_win(interaction.user.id)
+choice = choice.lower()
+if choice not in ['heads', 'tails', 'h', 't']:
+    await interaction.response.send_message("❌ Choose 'heads' or 'tails' (or 'h'/'t')!", ephemeral=True)
+    return
+
+if choice in ['h', 'heads']:
+    choice = 'heads'
+else:
+    choice = 'tails'
+
+balance = get_user_balance(interaction.user.id)
+if balance < amount:
+    await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
+    return
+
+won = should_win(interaction.user.id)
 update_result(interaction.user.id, won)
-    
-    if won:
+
+if won:
     result = choice
 else:
     if choice == 'heads':
@@ -638,39 +637,39 @@ else:
     else:
         result = 'heads'
 
-    if won:
-        winnings = amount
-        new_balance = update_balance(interaction.user.id, winnings)
-        embed = discord.Embed(title="🪙 Coinflip - YOU WON!", color=0x00ff00)
-        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
-        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
-        embed.add_field(name="Winnings", value=f"+{winnings:,} 🪙", inline=True)
-    else:
-        new_balance = update_balance(interaction.user.id, -amount)
-        embed = discord.Embed(title="🪙 Coinflip - YOU LOST!", color=0xff4444)
-        embed.add_field(name="Your Choice", value=choice.title(), inline=True)
-        embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
-        embed.add_field(name="Lost", value=f"-{amount:,} 🪙", inline=True)
-    
-    embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
-    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-    
-    set_short_cooldown(interaction.user.id, "coinflip")
-    await save_data()
-    
-    await log_action(
-        "COINFLIP",
-        f"🪙 Coinflip {'Win' if won else 'Loss'}",
-        f"{interaction.user.mention} {'won' if won else 'lost'} **{amount:,} tokens** on coinflip",
-        color=0x00ff00 if won else 0xff4444,
-        user=interaction.user,
-        fields=[
-            {"name": "Bet Amount", "value": f"{amount:,} 🪙", "inline": True},
-            {"name": "Choice", "value": choice.title(), "inline": True},
-            {"name": "Result", "value": result.title(), "inline": True},
-            {"name": "Outcome", "value": "Won" if won else "Lost", "inline": True}
-        ]
-    )
+if won:
+    winnings = amount
+    new_balance = update_balance(interaction.user.id, winnings)
+    embed = discord.Embed(title="🪙 Coinflip - YOU WON!", color=0x00ff00)
+    embed.add_field(name="Your Choice", value=choice.title(), inline=True)
+    embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
+    embed.add_field(name="Winnings", value=f"+{winnings:,} 🪙", inline=True)
+else:
+    new_balance = update_balance(interaction.user.id, -amount)
+    embed = discord.Embed(title="🪙 Coinflip - YOU LOST!", color=0xff4444)
+    embed.add_field(name="Your Choice", value=choice.title(), inline=True)
+    embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
+    embed.add_field(name="Lost", value=f"-{amount:,} 🪙", inline=True)
+
+embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=False)
+embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+
+set_short_cooldown(interaction.user.id, "coinflip")
+await save_data()
+
+await log_action(
+    "COINFLIP",
+    f"🪙 Coinflip {'Win' if won else 'Loss'}",
+    f"{interaction.user.mention} {'won' if won else 'lost'} **{amount:,} tokens** on coinflip",
+    color=0x00ff00 if won else 0xff4444,
+    user=interaction.user,
+    fields=[
+        {"name": "Bet Amount", "value": f"{amount:,} 🪙", "inline": True},
+        {"name": "Choice", "value": choice.title(), "inline": True},
+        {"name": "Result", "value": result.title(), "inline": True},
+        {"name": "Outcome", "value": "Won" if won else "Lost", "inline": True}
+    ]
+)
     
     await interaction.response.send_message(embed=embed)
 
