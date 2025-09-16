@@ -1292,12 +1292,15 @@ async def addshop(interaction: discord.Interaction):
                 {"name": "Changes Made", "value": "Updated item properties", "inline": False}
             ]
         )
-        
-        embed = discord.Embed(title="✅ Item Updated!", color=0x0099ff)
-        embed.add_field(name="Item", value=shop_data[item_idx['name'], inline=True)
-        embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']:,} 🪙", inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        # Ensure previous lines and this line are aligned correctly
+if some_condition:
+    embed = discord.Embed(title="✅ Item Updated!", color=0x0099ff)
+    embed.add_field(name="Item", value=f"{shop_data[item_idx]['name']}", inline=True)
+    embed.add_field(name="Price", value=f"{shop_data[item_idx]['price']}.", inline=True)
+    embed.add_field(name="Changes Made", value="Updated item properties", inline=False)
+
+await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 class DeleteItemModal(discord.ui.Modal):
     def __init__(self):
