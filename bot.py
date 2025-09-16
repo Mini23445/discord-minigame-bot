@@ -630,8 +630,14 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
     won = should_win(interaction.user.id)
 update_result(interaction.user.id, won)
     
-    result = choice if won else ('tails' if choice == 'heads' else 'heads')
-    
+    if won:
+    result = choice
+else:
+    if choice == 'heads':
+        result = 'tails'
+    else:
+        result = 'heads'
+
     if won:
         winnings = amount
         new_balance = update_balance(interaction.user.id, winnings)
