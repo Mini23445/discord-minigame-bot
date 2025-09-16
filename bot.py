@@ -1280,7 +1280,7 @@ async def addshop(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         
         # Log shop item update
-        await log_action(
+    await log_action(
             "SHOP_UPDATE",
             "✏️ Shop Item Updated",
             f"**{interaction.user.mention}** updated shop item",
