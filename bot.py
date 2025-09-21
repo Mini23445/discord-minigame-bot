@@ -13,7 +13,7 @@ import aiofiles
 import logging
 logging.basicConfig(level=logging.INFO)
 
-print("🚀 Starting Discord Bot...")
+print("🚀 Starting Bot...")
 
 # Bot setup
 intents = discord.Intents.default()
