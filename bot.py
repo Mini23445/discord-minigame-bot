@@ -13,7 +13,7 @@ import aiofiles
 import logging
 logging.basicConfig(level=logging.INFO)
 
-print("🚀 Starting Dd Bot...")
+print("🚀 Starting Discord Bot...")
 
 # Bot setup
 intents = discord.Intents.default()
@@ -164,33 +164,33 @@ async def load_data():
         active_giveaways = {}
         giveaway_daily_totals = {}
 
-def parse_amount(amount_str):
-    """Parse amount strings with k, m, b suffixes"""
-    if isinstance(amount_str, int):
-        return amount_str
+def parse_amount(input_str):
+    """
+    Converts a string with shorthand notation to an integer.
+    Supports:
+        k = thousand (e.g., 1k = 1,000)
+        m = million (e.g., 1m = 1,000,000)
+        b = billion (e.g., 1b = 1,000,000,000)
+    """
+    input_str = input_str.strip().lower()  # Remove spaces and make lowercase
     
-    amount_str = str(amount_str).strip().lower()
-    
-    if amount_str.endswith('k'):
-        try:
-            return int(float(amount_str[:-1]) * 1000)
-        except ValueError:
-            return None
-    elif amount_str.endswith('m'):
-        try:
-            return int(float(amount_str[:-1]) * 1000000)
-        except ValueError:
-            return None
-    elif amount_str.endswith('b'):
-        try:
-            return int(float(amount_str[:-1]) * 1000000000)
-        except ValueError:
-            return None
+    if input_str.endswith('k'):
+        return int(float(input_str[:-1]) * 1000)
+    elif input_str.endswith('m'):
+        return int(float(input_str[:-1]) * 1000000)
+    elif input_str.endswith('b'):
+        return int(float(input_str[:-1]) * 1000000000)
     else:
-        try:
-            return int(amount_str)
-        except ValueError:
-            return None
+        # If no abbreviation, just convert to integer
+        return int(input_str)
+
+# Example of how to use it in your code:
+try:
+    user_input = input("Enter amount: ")
+    amount = parse_amount(user_input)
+    print(f"Parsed amount: {amount}")
+except ValueError:
+    print("Please enter a valid number (e.g., 100, 1.5k, 2m)")
 
 async def save_data():
     """Save all data to files"""
