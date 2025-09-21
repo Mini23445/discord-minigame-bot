@@ -13,7 +13,7 @@ import aiofiles
 import logging
 logging.basicConfig(level=logging.INFO)
 
-print("🚀 Starting Bot...")
+print("🚀 Starting Discord Bot...")
 
 # Bot setup
 intents = discord.Intents.default()
@@ -100,183 +100,135 @@ CRIME_ACTIVITIES = [
     "used expired coupon"
 ]
 
-# Global lock for data operations
-data_lock = asyncio.Lock()
-
 async def load_data():
-    """Load all data from files with better error handling"""
+    """Load all data from files"""
     global user_data, shop_data, cooldowns, active_giveaways, giveaway_daily_totals
     
-    async with data_lock:
-        try:
-            # Load user data
-            if os.path.exists(USER_DATA_FILE):
-                try:
-                    async with aiofiles.open(USER_DATA_FILE, 'r', encoding='utf-8') as f:
-                        contents = await f.read()
-                        if contents.strip():
-                            user_data = json.loads(contents)
-                            print(f"✅ Loaded user data for {len(user_data)} users")
-                        else:
-                            print("⚠️ User data file is empty, starting fresh")
-                            user_data = {}
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    print(f"⚠️ Error reading user data file: {e}, starting fresh")
-                    user_data = {}
-            else:
-                print("ℹ️ No user data file found, starting fresh")
-                user_data = {}
-                
-            # Load shop data
-            if os.path.exists(SHOP_DATA_FILE):
-                try:
-                    async with aiofiles.open(SHOP_DATA_FILE, 'r', encoding='utf-8') as f:
-                        contents = await f.read()
-                        if contents.strip():
-                            shop_data = json.loads(contents)
-                            print(f"✅ Loaded {len(shop_data)} shop items")
-                        else:
-                            print("⚠️ Shop data file is empty, starting fresh")
-                            shop_data = []
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    print(f"⚠️ Error reading shop data file: {e}, starting fresh")
-                    shop_data = []
-            else:
-                print("ℹ️ No shop data file found, starting fresh")
-                shop_data = []
-                
-            # Load cooldowns
-            if os.path.exists(COOLDOWNS_FILE):
-                try:
-                    async with aiofiles.open(COOLDOWNS_FILE, 'r', encoding='utf-8') as f:
-                        contents = await f.read()
-                        if contents.strip():
-                            cooldowns = json.loads(contents)
-                            print("✅ Loaded cooldown data")
-                        else:
-                            print("⚠️ Cooldowns file is empty, starting fresh")
-                            cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    print(f"⚠️ Error reading cooldowns file: {e}, starting fresh")
-                    cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
-            else:
-                print("ℹ️ No cooldowns file found, starting fresh")
-                cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
-            
-            # Load active giveaways
-            if os.path.exists(GIVEAWAYS_FILE):
-                try:
-                    async with aiofiles.open(GIVEAWAYS_FILE, 'r', encoding='utf-8') as f:
-                        contents = await f.read()
-                        if contents.strip():
-                            active_giveaways = json.loads(contents)
-                            print(f"✅ Loaded {len(active_giveaways)} active giveaways")
-                        else:
-                            print("⚠️ Giveaways file is empty, starting fresh")
-                            active_giveaways = {}
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    print(f"⚠️ Error reading giveaways file: {e}, starting fresh")
-                    active_giveaways = {}
-            else:
-                print("ℹ️ No giveaways file found, starting fresh")
-                active_giveaways = {}
-                
-            # Load daily giveaway totals
-            if os.path.exists(DAILY_GIVEAWAYS_FILE):
-                try:
-                    async with aiofiles.open(DAILY_GIVEAWAYS_FILE, 'r', encoding='utf-8') as f:
-                        contents = await f.read()
-                        if contents.strip():
-                            giveaway_daily_totals = json.loads(contents)
-                            print("✅ Loaded daily giveaway totals")
-                        else:
-                            print("⚠️ Daily giveaways file is empty, starting fresh")
-                            giveaway_daily_totals = {}
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    print(f"⚠️ Error reading daily giveaways file: {e}, starting fresh")
-                    giveaway_daily_totals = {}
-            else:
-                print("ℹ️ No daily giveaways file found, starting fresh")
-                giveaway_daily_totals = {}
-                
-        except Exception as e:
-            print(f"⚠️ Unexpected error loading data: {e}")
-            # Initialize empty data structures if loading fails
+    try:
+        # Load user data
+        if os.path.exists(USER_DATA_FILE):
+            async with aiofiles.open(USER_DATA_FILE, 'r') as f:
+                contents = await f.read()
+                user_data = json.loads(contents)
+                print(f"✅ Loaded user data for {len(user_data)} users")
+        else:
+            print("ℹ️ No user data file found, starting fresh")
             user_data = {}
+            
+        # Load shop data
+        if os.path.exists(SHOP_DATA_FILE):
+            async with aiofiles.open(SHOP_DATA_FILE, 'r') as f:
+                contents = await f.read()
+                shop_data = json.loads(contents)
+                print(f"✅ Loaded {len(shop_data)} shop items")
+        else:
+            print("ℹ️ No shop data file found, starting fresh")
             shop_data = []
+            
+        # Load cooldowns
+        if os.path.exists(COOLDOWNS_FILE):
+            async with aiofiles.open(COOLDOWNS_FILE, 'r') as f:
+                contents = await f.read()
+                cooldowns = json.loads(contents)
+                print("✅ Loaded cooldown data")
+        else:
+            print("ℹ️ No cooldowns file found, starting fresh")
             cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
+        
+        # Load active giveaways
+        if os.path.exists(GIVEAWAYS_FILE):
+            async with aiofiles.open(GIVEAWAYS_FILE, 'r') as f:
+                contents = await f.read()
+                active_giveaways = json.loads(contents)
+                print(f"✅ Loaded {len(active_giveaways)} active giveaways")
+        else:
+            print("ℹ️ No giveaways file found, starting fresh")
             active_giveaways = {}
+            
+        # Load daily giveaway totals
+        if os.path.exists(DAILY_GIVEAWAYS_FILE):
+            async with aiofiles.open(DAILY_GIVEAWAYS_FILE, 'r') as f:
+                contents = await f.read()
+                giveaway_daily_totals = json.loads(contents)
+                print("✅ Loaded daily giveaway totals")
+        else:
+            print("ℹ️ No daily giveaways file found, starting fresh")
             giveaway_daily_totals = {}
+            
+    except Exception as e:
+        print(f"⚠️ Error loading data: {e}")
+        # Initialize empty data structures if loading fails
+        user_data = {}
+        shop_data = []
+        cooldowns = {"daily": {}, "work": {}, "crime": {}, "gift": {}, "buy": {}, "coinflip": {}, "duel": {}, "giveaway": {}}
+        active_giveaways = {}
+        giveaway_daily_totals = {}
+
+def parse_amount(amount_str):
+    """Parse amount strings with k, m, b suffixes"""
+    if isinstance(amount_str, int):
+        return amount_str
+    
+    amount_str = str(amount_str).strip().lower()
+    
+    if amount_str.endswith('k'):
+        try:
+            return int(float(amount_str[:-1]) * 1000)
+        except ValueError:
+            return None
+    elif amount_str.endswith('m'):
+        try:
+            return int(float(amount_str[:-1]) * 1000000)
+        except ValueError:
+            return None
+    elif amount_str.endswith('b'):
+        try:
+            return int(float(amount_str[:-1]) * 1000000000)
+        except ValueError:
+            return None
+    else:
+        try:
+            return int(amount_str)
+        except ValueError:
+            return None
 
 async def save_data():
-    """Save all data to files with better error handling and atomic writes"""
-    async with data_lock:
-        saved_files = []
-        failed_files = []
+    """Save all data to files"""
+    try:
+        # Save user data
+        async with aiofiles.open(USER_DATA_FILE, 'w') as f:
+            await f.write(json.dumps(user_data, indent=2))
         
-        # Create a list of save operations
-        save_operations = [
-            (USER_DATA_FILE, user_data, "user data"),
-            (SHOP_DATA_FILE, shop_data, "shop data"),
-            (COOLDOWNS_FILE, cooldowns, "cooldowns"),
-            (GIVEAWAYS_FILE, active_giveaways, "active giveaways"),
-            (DAILY_GIVEAWAYS_FILE, giveaway_daily_totals, "daily giveaway totals")
-        ]
+        # Save shop data
+        async with aiofiles.open(SHOP_DATA_FILE, 'w') as f:
+            await f.write(json.dumps(shop_data, indent=2))
         
-        for file_path, data, description in save_operations:
-            try:
-                # Use atomic write pattern: write to temp file, then rename
-                temp_file = f"{file_path}.tmp"
-                
-                # Write to temporary file
-                async with aiofiles.open(temp_file, 'w', encoding='utf-8') as f:
-                    json_str = json.dumps(data, indent=2, ensure_ascii=False)
-                    await f.write(json_str)
-                    await f.flush()  # Force write to disk
-                
-                # Atomic rename (this is the critical part)
-                if os.path.exists(file_path):
-                    backup_file = f"{file_path}.bak"
-                    os.rename(file_path, backup_file)
-                
-                os.rename(temp_file, file_path)
-                
-                # Clean up backup
-                if os.path.exists(f"{file_path}.bak"):
-                    os.remove(f"{file_path}.bak")
-                
-                saved_files.append(description)
-                
-            except Exception as e:
-                print(f"⚠️ Error saving {description} to {file_path}: {e}")
-                failed_files.append(f"{description} ({str(e)})")
-                
-                # Clean up temp file if it exists
-                temp_file = f"{file_path}.tmp"
-                if os.path.exists(temp_file):
-                    try:
-                        os.remove(temp_file)
-                    except:
-                        pass
-        
-        if saved_files:
-            print(f"💾 Successfully saved: {', '.join(saved_files)}")
-        
-        if failed_files:
-            print(f"❌ Failed to save: {', '.join(failed_files)}")
-            return False
-        
+        # Save cooldowns
+        async with aiofiles.open(COOLDOWNS_FILE, 'w') as f:
+            await f.write(json.dumps(cooldowns, indent=2))
+            
+        # Save active giveaways
+        async with aiofiles.open(GIVEAWAYS_FILE, 'w') as f:
+            await f.write(json.dumps(active_giveaways, indent=2))
+            
+        # Save daily giveaway totals
+        async with aiofiles.open(DAILY_GIVEAWAYS_FILE, 'w') as f:
+            await f.write(json.dumps(giveaway_daily_totals, indent=2))
+            
+        print("💾 Data saved successfully")
         return True
+    except Exception as e:
+        print(f"⚠️ Error saving data: {e}")
+        return False
 
 async def force_save_on_exit():
     """Force save data when bot shuts down"""
     print("🔄 Bot shutting down, saving data...")
     try:
-        success = await save_data()
-        if success:
-            print("💾 Data saved successfully on exit")
+        if await save_data():
+            print("💾 Data saved on exit")
         else:
-            print("❌ Some data failed to save on exit")
+            print("❌ Failed to save data on exit")
     except Exception as e:
         print(f"⚠️ Error saving on exit: {e}")
 
@@ -415,17 +367,12 @@ def is_admin(user):
     """Check if user is admin"""
     return any(role.id == ADMIN_ROLE_ID for role in user.roles)
 
-# Auto-save task with more frequent saves
+# Auto-save task
 async def auto_save():
-    """Auto save every 10 seconds instead of 30"""
-    await asyncio.sleep(5)  # Initial delay
+    """Auto save every 30 seconds"""
     while True:
-        try:
-            await save_data()
-            await asyncio.sleep(10)  # Save every 10 seconds
-        except Exception as e:
-            print(f"⚠️ Error in auto-save: {e}")
-            await asyncio.sleep(10)
+        await asyncio.sleep(30)
+        await save_data()
 
 # Clean up expired duels
 async def cleanup_expired_duels():
@@ -504,13 +451,7 @@ async def on_message(message):
     if not message.author.bot and message.guild:
         tokens = random.randint(1, 5)
         update_balance(message.author.id, tokens)
-        # Save immediately after balance update
-        asyncio.create_task(save_data())
     await bot.process_commands(message)
-
-# Rest of the commands remain the same...
-# [I'll continue with just a few key commands to show the pattern, 
-# but all commands should call save_data() after any data changes]
 
 @bot.tree.command(name="balance", description="Check your token balance")
 async def balance(interaction: discord.Interaction):
@@ -551,8 +492,6 @@ async def daily(interaction: discord.Interaction):
     tokens = random.randint(1, 50)
     new_balance = update_balance(interaction.user.id, tokens)
     cooldowns["daily"][str(interaction.user.id)] = datetime.now().isoformat()
-    
-    # Save immediately after data changes
     await save_data()
     
     embed = discord.Embed(title="🎁 Daily Reward!", color=0x00ff00)
@@ -561,8 +500,6 @@ async def daily(interaction: discord.Interaction):
     embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
-    await save_data()
-
 
 @bot.tree.command(name="work", description="Work for tokens (3h cooldown)")
 async def work(interaction: discord.Interaction):
@@ -1107,7 +1044,7 @@ class AddItemModal(discord.ui.Modal):
         super().__init__(title="Add Shop Item")
     
     name = discord.ui.TextInput(label="Item Name")
-    price = discord.ui.TextInput(label="Price")
+    price = discord.ui.TextInput(label="Price (supports k, m, b suffixes)")  # Updated label
     description = discord.ui.TextInput(label="Description", required=False, style=discord.TextStyle.long)
     
     async def on_submit(self, interaction: discord.Interaction):
@@ -1115,18 +1052,16 @@ class AddItemModal(discord.ui.Modal):
             await interaction.response.send_message("❌ Admin only!", ephemeral=True)
             return
             
-        try:
-            price_val = int(self.price.value)
-            if price_val <= 0:
-                await interaction.response.send_message("❌ Price must be positive!", ephemeral=True)
-                return
-        except:
-            await interaction.response.send_message("❌ Invalid price!", ephemeral=True)
+        # Parse price with suffixes
+        price_val = parse_amount(self.price.value)
+        if price_val is None or price_val <= 0:
+            await interaction.response.send_message("❌ Invalid price! Use numbers or suffixes like 10k, 1m, 1b", ephemeral=True)
             return
         
+        # Check for duplicate items
         for item in shop_data:
             if item['name'].lower() == self.name.value.lower():
-                await interaction.response.send_message("❌ Item already exists!", ephemeral=True)
+                await interaction.response.send_message("❌ Item with this name already exists!", ephemeral=True)
                 return
         
         new_item = {
@@ -1164,7 +1099,7 @@ class UpdateItemModal(discord.ui.Modal):
     
     item_number = discord.ui.TextInput(label="Item Number", placeholder="Enter number (1, 2, 3...)")
     name = discord.ui.TextInput(label="New Name (optional)", required=False)
-    price = discord.ui.TextInput(label="New Price (optional)", required=False)
+    price = discord.ui.TextInput(label="New Price (optional, supports k, m, b)", required=False)  # Updated label
     description = discord.ui.TextInput(label="New Description (optional)", required=False, style=discord.TextStyle.long)
     
     async def on_submit(self, interaction: discord.Interaction):
@@ -1182,6 +1117,7 @@ class UpdateItemModal(discord.ui.Modal):
             return
         
         if self.name.value.strip():
+            # Check for duplicate names (excluding current item)
             for i, item in enumerate(shop_data):
                 if i != item_idx and item['name'].lower() == self.name.value.lower():
                     await interaction.response.send_message("❌ Item with this name already exists!", ephemeral=True)
@@ -1189,16 +1125,12 @@ class UpdateItemModal(discord.ui.Modal):
             shop_data[item_idx]['name'] = self.name.value.strip()
         
         if self.price.value.strip():
-            try:
-                new_price = int(self.price.value)
-                if new_price <= 0:
-                    await interaction.response.send_message("❌ Price must be greater than 0!", ephemeral=True)
-                    return
-                shop_data[item_idx]['price'] = new_price
-            except:
-                await interaction.response.send_message("❌ Price must be a valid number!", ephemeral=True)
+            # Parse price with suffixes
+            new_price = parse_amount(self.price.value)
+            if new_price is None or new_price <= 0:
+                await interaction.response.send_message("❌ Price must be a valid number! Use numbers or suffixes like 10k, 1m, 1b", ephemeral=True)
                 return
-            
+            shop_data[item_idx]['price'] = new_price
         
         if self.description.value.strip():
             shop_data[item_idx]['description'] = self.description.value.strip()
@@ -1513,7 +1445,7 @@ async def leaderboard(interaction: discord.Interaction, page: int = 1):
     
     embed.set_footer(text=f"Page {page}/{max_pages} • {len(sorted_users)} total users")
     
-    await interaction.response.send_message(embed=embed, ephemeral=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="adminbalance", description="Check user balance (Admin only)")
 async def adminbalance(interaction: discord.Interaction, user: discord.Member):
@@ -1538,75 +1470,79 @@ async def adminbalance(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="addtoken", description="Add tokens (Admin only)")
-async def addtoken(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def addtoken(interaction: discord.Interaction, user: discord.Member, amount: str):  # Changed to string
     if not is_admin(interaction.user):
         await interaction.response.send_message("❌ Admin only!", ephemeral=True)
         return
     
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be positive!", ephemeral=True)
+    # Parse amount with suffixes
+    parsed_amount = parse_amount(amount)
+    if parsed_amount is None or parsed_amount <= 0:
+        await interaction.response.send_message("❌ Invalid amount! Use numbers or suffixes like 10k, 1m, 1b", ephemeral=True)
         return
     
-    new_balance = update_balance(user.id, amount)
+    new_balance = update_balance(user.id, parsed_amount)
     await save_data()
     
     await log_action(
         "ADD_TOKENS",
         "💰 Tokens Added",
-        f"**{interaction.user.mention}** added **{amount:,} tokens** to {user.mention}",
+        f"**{interaction.user.mention}** added **{parsed_amount:,} tokens** to {user.mention}",
         color=0x00ff00,
         user=interaction.user,
         fields=[
             {"name": "Target User", "value": user.mention, "inline": True},
-            {"name": "Amount Added", "value": f"{amount:,} 🪙", "inline": True},
+            {"name": "Amount Added", "value": f"{parsed_amount:,} 🪙", "inline": True},
             {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
         ]
     )
     
     embed = discord.Embed(title="✅ Tokens Added", color=0x00ff00)
     embed.add_field(name="User", value=user.mention, inline=True)
-    embed.add_field(name="Added", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="Added", value=f"{parsed_amount:,} 🪙", inline=True)
     embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="removetoken", description="Remove tokens from a user (Admin only)")
-async def removetoken(interaction: discord.Interaction, user: discord.Member, amount: int):
+async def removetoken(interaction: discord.Interaction, user: discord.Member, amount: str):  # Changed to string
     if not is_admin(interaction.user):
         await interaction.response.send_message("❌ Admin only!", ephemeral=True)
         return
     
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be positive!", ephemeral=True)
+    # Parse amount with suffixes
+    parsed_amount = parse_amount(amount)
+    if parsed_amount is None or parsed_amount <= 0:
+        await interaction.response.send_message("❌ Invalid amount! Use numbers or suffixes like 10k, 1m, 1b", ephemeral=True)
         return
     
     current_balance = get_user_balance(user.id)
-    if current_balance < amount:
+    if current_balance < parsed_amount:
         await interaction.response.send_message(
-            f"❌ User only has {current_balance:,} tokens! Cannot remove {amount:,} tokens.",
+            f"❌ User only has {current_balance:,} tokens! Cannot remove {parsed_amount:,} tokens.",
             ephemeral=True
         )
         return
     
-    new_balance = update_balance(user.id, -amount)
+    new_balance = update_balance(user.id, -parsed_amount)
     await save_data()
     
     await log_action(
         "REMOVE_TOKENS",
         "💰 Tokens Removed",
-        f"**{interaction.user.mention}** removed **{amount:,} tokens** from {user.mention}",
+        f"**{interaction.user.mention}** removed **{parsed_amount:,} tokens** from {user.mention}",
         color=0xff4444,
         user=interaction.user,
         fields=[
             {"name": "Target User", "value": user.mention, "inline": True},
-            {"name": "Amount Removed", "value": f"{amount:,} 🪙", "inline": True},
+            {"name": "Amount Removed", "value": f"{parsed_amount:,} 🪙", "inline": True},
             {"name": "New Balance", "value": f"{new_balance:,} 🪙", "inline": True}
         ]
     )
     
     embed = discord.Embed(title="✅ Tokens Removed", color=0xff4444)
     embed.add_field(name="User", value=user.mention, inline=True)
-    embed.add_field(name="Removed", value=f"{amount:,} 🪙", inline=True)
+    embed.add_field(name="Removed", value=f"{parsed_amount:,} 🪙", inline=True)
     embed.add_field(name="New Balance", value=f"{new_balance:,} 🪙", inline=True)
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -2288,8 +2224,6 @@ async def about(ctx):
     embed.set_thumbnail(url=bot.user.display_avatar.url)
     
     await ctx.send(embed=embed)
-
-
 
 # Run the bot
 if __name__ == "__main__":
