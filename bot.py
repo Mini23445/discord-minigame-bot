@@ -592,7 +592,7 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
     roll = random.randint(1, 100)
 
     # 57% chance to lose, 43% chance to win
-    won = roll > 57  # If roll is 58-100, player wins (43% chance)
+    won = roll > 54  # If roll is 55-100, player wins (47% chance)
 
     # Make it feel more natural by using actual coin flip logic
     # but with weighted outcomes
