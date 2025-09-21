@@ -592,10 +592,10 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
     won = roll > 54  # If roll is 55-100, player wins (46% chance)
 
     # Set the result based on whether player should win or lose
-    if won:
+if won:
     # Player should win, so result matches their choice
     result = choice
-    else:
+else:
     # Player should lose, so result is opposite of their choice
     result = 'tails' if choice == 'heads' else 'heads'
         
