@@ -1804,7 +1804,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
             result_embed.add_field(name="👥 PARTICIPANTS", value=f"**{len(giveaway['entries'])}**", inline=True)
             result_embed.add_field(name="⏰ DURATION", value="**25 seconds**", inline=True)
             
-            result_embed.set_footer(text="Winners announced above!")
+            result_embed.set_footer(text="Winners announced below!")
             
             try:
                 await interaction.edit_original_response(embed=result_embed, view=None)
