@@ -556,13 +556,28 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
         return
 
-    win_chance = 50.0  # 50% chance to win
-    random_number = random.uniform(0, 100)
-    won = random_number <= win_chance
+    # More natural 55/45 odds with 5% house edge
+    # Instead of using a simple percentage, we'll use a more natural approach
+    # that feels less like an algorithm
     
-    result = choice if won else ('tails' if choice == 'heads' else 'heads')
+    # Generate a random number between 1-100
+    roll = random.randint(1, 100)
+    
+    # 55% chance to lose, 45% chance to win
+    won = roll > 55  # If roll is 56-100, player wins (45% chance)
+    
+    # Make it feel more natural by using actual coin flip logic
+    # but with weighted outcomes
+    actual_flip = random.choice(['heads', 'tails'])
+    result = actual_flip
+    
+    # If the player should lose based on house edge, override the result
+    # but make it feel natural by only doing this sometimes
+    if not won and random.random() < 0.7:  # 70% of losses feel natural
+        result = 'tails' if choice == 'heads' else 'heads'
     
     if won:
+        # Player wins their bet
         winnings = amount
         new_balance = update_balance(interaction.user.id, winnings)
         embed = discord.Embed(title="🪙 Coinflip - YOU WON!", color=0x00ff00)
@@ -570,6 +585,7 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         embed.add_field(name="Result", value=f"🪙 {result.title()}", inline=True)
         embed.add_field(name="Winnings", value=f"+{winnings:,} 🪙", inline=True)
     else:
+        # Player loses their bet (5% house edge)
         new_balance = update_balance(interaction.user.id, -amount)
         embed = discord.Embed(title="🪙 Coinflip - YOU LOST!", color=0xff4444)
         embed.add_field(name="Your Choice", value=choice.title(), inline=True)
@@ -1554,28 +1570,25 @@ class GiveawayEnterView(discord.ui.View):
 
 @bot.tree.command(name="giveaway", description="Start a token giveaway (25 seconds)")
 async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
-    # Check cooldown
-    can_use, next_use = can_use_command(interaction.user.id, "giveaway", 1)
-    
-    if not can_use:
-        time_left = format_time(next_use)
-        await interaction.response.send_message(f"⏰ Please wait **{time_left}** before starting another giveaway!", ephemeral=True)
+    # Check cooldown - 3 minutes (180 seconds) for giveaways
+    if not can_use_short_cooldown(interaction.user.id, "giveaway", 180):
+        await interaction.response.send_message("⏰ Please wait 3 minutes before starting another giveaway!", ephemeral=True)
         return
     
-    # Validate parameters
-    if amount <= 0:
-        await interaction.response.send_message("❌ Amount must be greater than 0!", ephemeral=True)
+    # Validate parameters - Minimum 50 tokens, maximum 5k for giveaway
+    if amount < 50:
+        await interaction.response.send_message("❌ Minimum giveaway amount is 50 tokens!", ephemeral=True)
         return
     
-    if amount > 10000:
-        await interaction.response.send_message("❌ Maximum giveaway amount is 10,000 tokens!", ephemeral=True)
+    if amount > 5000:
+        await interaction.response.send_message("❌ Maximum giveaway amount is 5,000 tokens!", ephemeral=True)
         return
     
     if winners < 1 or winners > 12:
         await interaction.response.send_message("❌ Number of winners must be between 1 and 12!", ephemeral=True)
         return
     
-    # Check daily giveaway limit (50k per user)
+    # Check daily giveaway limit
     user_id = str(interaction.user.id)
     today = datetime.now().date().isoformat()
     
@@ -1602,7 +1615,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
     # Deduct tokens from user
     new_balance = update_balance(interaction.user.id, -amount)
     giveaway_daily_totals[user_id][today] += amount
-    cooldowns["giveaway"][str(interaction.user.id)] = datetime.now().isoformat()
+    set_short_cooldown(interaction.user.id, "giveaway")  # Set 3 minute cooldown
     
     # Create giveaway
     giveaway_id = f"{interaction.user.id}_{int(time.time())}"
@@ -1616,10 +1629,181 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
         'entries': {},
         'total_entries': 0,
         'created_at': datetime.now().isoformat(),
-        'end_time': (datetime.now() + timedelta(seconds=25)).isoformat()
+        'end_time': (datetime.now() + timedelta(seconds=25)).isoformat()  # 25 seconds
     }
     
     await save_data()
+    
+    # Create embed
+    embed = discord.Embed(
+        title="🎉 TOKEN GIVEAWAY 🎉",
+        description=f"Hosted by {interaction.user.mention}",
+        color=0xFFD700,
+        timestamp=datetime.now()
+    )
+    
+    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1125274830004781156.webp?size=96&quality=lossless")
+    
+    # Main prize info
+    embed.add_field(name="🏆 TOTAL PRIZE", value=f"**{amount:,}** 🪙", inline=True)
+    embed.add_field(name="👑 WINNERS", value=f"**{winners}** lucky winners", inline=True)
+    embed.add_field(name="💰 PRIZE PER WINNER", value=f"**{prize_per_winner:,}** 🪙", inline=True)
+    
+    # Time and entries
+    embed.add_field(name="⏰ TIME REMAINING", value="**25 seconds**", inline=True)
+    embed.add_field(name="🎫 ENTRIES", value="**0** entries", inline=True)
+    embed.add_field(name="‎", value="‎", inline=True)  # Empty field instead of win percentage
+    
+    # Role bonus section
+    role_bonus_text = "\n".join([f"<@&{role_id}>: **+{bonus} entries**" for role_id, bonus in PRIORITY_ROLES.items()])
+    if role_bonus_text:
+        embed.add_field(name="🌟 ROLE BONUSES", value=role_bonus_text, inline=False)
+    
+    # Footer with instructions
+    embed.set_footer(text="Click the button below to enter! • Ends in 25 seconds")
+    
+    view = GiveawayEnterView(giveaway_id)
+    await interaction.response.send_message(embed=embed, view=view)
+    
+    # Update the giveaway message every 5 seconds with progress
+    async def update_giveaway_message():
+        for i in range(5):  # 5 updates (25 seconds total)
+            await asyncio.sleep(5)
+            
+            if giveaway_id not in active_giveaways:
+                break
+                
+            giveaway = active_giveaways[giveaway_id]
+            time_left = 20 - (i * 5)
+            
+            # Update embed
+            updated_embed = discord.Embed(
+                title="🎉 TOKEN GIVEAWAY 🎉",
+                description=f"Hosted by {interaction.user.mention}",
+                color=0xFFD700,
+                timestamp=datetime.now()
+            )
+            
+            updated_embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1125274830004781156.webp?size=96&quality=lossless")
+            updated_embed.add_field(name="🏆 TOTAL PRIZE", value=f"**{amount:,}** 🪙", inline=True)
+            updated_embed.add_field(name="👑 WINNERS", value=f"**{winners}** lucky winners", inline=True)
+            updated_embed.add_field(name="💰 PRIZE PER WINNER", value=f"**{prize_per_winner:,}** 🪙", inline=True)
+            updated_embed.add_field(name="⏰ TIME REMAINING", value=f"**{time_left} seconds**", inline=True)
+            updated_embed.add_field(name="🎫 ENTRIES", value=f"**{giveaway['total_entries']:,}** entries", inline=True)
+            updated_embed.add_field(name="‎", value="‎", inline=True)  # Empty field instead of win percentage
+            
+            if role_bonus_text:
+                updated_embed.add_field(name="🌟 ROLE BONUSES", value=role_bonus_text, inline=False)
+            
+            updated_embed.set_footer(
+                text=f"Click the button below to enter! • Ends in {time_left} seconds"
+            )
+            
+            try:
+                await interaction.edit_original_response(embed=updated_embed, view=view)
+            except:
+                break
+    
+    # Start the update task
+    asyncio.create_task(update_giveaway_message())
+    
+    # Wait for giveaway to end
+    await asyncio.sleep(25)
+    
+    # End the giveaway
+    if giveaway_id in active_giveaways:
+        giveaway = active_giveaways[giveaway_id]
+        
+        if giveaway['total_entries'] > 0:
+            # Select winners
+            all_entries = []
+            for user_id, entries in giveaway['entries'].items():
+                all_entries.extend([user_id] * entries)
+            
+            # Ensure we select exactly the number of winners requested
+            if len(set(all_entries)) < winners:
+                # Not enough unique participants, select all available
+                selected_winners = list(set(all_entries))
+            else:
+                # Select exactly the number of winners requested
+                selected_winners = random.sample(list(set(all_entries)), winners)
+            
+            # Distribute prizes
+            winner_mentions = []
+            for winner_id in selected_winners:
+                try:
+                    winner = await bot.fetch_user(int(winner_id))
+                    update_balance(winner.id, giveaway['prize_per_winner'])
+                    winner_mentions.append(f"{winner.mention} - {giveaway['prize_per_winner']:,} 🪙")
+                except:
+                    continue
+            
+            # Send winner announcement in a separate message
+            if winner_mentions:
+                winners_embed = discord.Embed(
+                    title="🎊 GIVEAWAY WINNERS 🎊",
+                    description=f"Congratulations to the winners of {interaction.user.mention}'s giveaway!",
+                    color=0x00ff00,
+                    timestamp=datetime.now()
+                )
+                
+                winners_embed.add_field(name="🏆 Total Prize", value=f"{giveaway['amount']:,} 🪙", inline=True)
+                winners_embed.add_field(name="👑 Winners", value=f"{len(winner_mentions)}", inline=True)
+                winners_embed.add_field(name="💰 Prize Each", value=f"{giveaway['prize_per_winner']:,} 🪙", inline=True)
+                
+                winners_embed.add_field(
+                    name="🎉 Lucky Winners", 
+                    value="\n".join(winner_mentions), 
+                    inline=False
+                )
+                
+                winners_embed.set_footer(text="Congratulations! Tokens have been distributed")
+                
+                await interaction.followup.send(embed=winners_embed)
+            
+            # Update the original message with results
+            result_embed = discord.Embed(
+                title="🎊 GIVEAWAY ENDED 🎊",
+                description=f"Hosted by {interaction.user.mention}",
+                color=0x808080,
+                timestamp=datetime.now()
+            )
+            
+            result_embed.add_field(name="🏆 TOTAL PRIZE", value=f"**{giveaway['amount']:,}** 🪙", inline=True)
+            result_embed.add_field(name="👑 WINNERS", value=f"**{len(winner_mentions)}/{giveaway['winners']}**", inline=True)
+            result_embed.add_field(name="💰 PRIZE PER WINNER", value=f"**{giveaway['prize_per_winner']:,}** 🪙", inline=True)
+            result_embed.add_field(name="🎫 TOTAL ENTRIES", value=f"**{giveaway['total_entries']:,}**", inline=True)
+            result_embed.add_field(name="👥 PARTICIPANTS", value=f"**{len(giveaway['entries'])}**", inline=True)
+            result_embed.add_field(name="⏰ DURATION", value="**25 seconds**", inline=True)
+            
+            result_embed.set_footer(text="Winners announced above!")
+            
+            try:
+                await interaction.edit_original_response(embed=result_embed, view=None)
+            except:
+                pass
+            
+        else:
+            # No entries, refund the creator
+            update_balance(interaction.user.id, giveaway['amount'])
+            giveaway_daily_totals[user_id][today] -= giveaway['amount']
+            
+            refund_embed = discord.Embed(
+                title="🎉 GIVEAWAY ENDED",
+                description="No one entered the giveaway. Tokens have been refunded.",
+                color=0xff4444
+            )
+            
+            refund_embed.set_footer(text="Better luck next time!")
+            
+            try:
+                await interaction.edit_original_response(embed=refund_embed, view=None)
+            except:
+                pass
+        
+        # Remove giveaway from active list
+        del active_giveaways[giveaway_id]
+        await save_data()
     
     # Create embed with improved UI
     embed = discord.Embed(
@@ -1660,12 +1844,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
         value="**0** entries", 
         inline=True
     )
-    embed.add_field(
-        name="🎲 YOUR CHANCES", 
-        value="Enter to see!", 
-        inline=True
-    )
-    
+
     # Role bonus section
     role_bonus_text = "\n".join([f"<@&{role_id}>: **+{bonus} entries**" for role_id, bonus in PRIORITY_ROLES.items()])
     if role_bonus_text:
