@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 import time
 import sys
 import aiofiles
-import random
 
 # Railway logging setup
 import logging
@@ -585,40 +584,26 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
         return
 
-   def coin_flip(choice='heads'):
-    # Generate a random number between 1-100 to simulate the game
+    # More natural 40/60 odds with house edge
+    # Instead of using a simple percentage, we'll use a more natural approach
+    # that feels less like an algorithm
+
+    # Generate a random number between 1-100
     roll = random.randint(1, 100)
-    
-    # The basic odds: 55% chance to lose, 45% chance to win (house edge is implicit)
-    # So if roll is between 1 and 55, the player loses; between 56 and 100, the player wins
-    # But we want to make sure the outcome feels natural.
-    
-    # 45% chance to win overall (55% lose)
-    won = roll > 55  # 45% win chance
-    
-    # Simulate a coin flip based on player's choice (heads or tails)
-    # If the player chooses heads or tails, we simulate a fair flip
+
+    # 60% chance to lose, 40% chance to win
+    won = roll > 60  # If roll is 61-100, player wins (40% chance)
+
+    # Make it feel more natural by using actual coin flip logic
+    # but with weighted outcomes
     actual_flip = random.choice(['heads', 'tails'])
+    result = actual_flip
 
-    # Adjusting the player's chance for a "natural" feel but lowering the odds
-    # We can adjust the random outcome so that it still feels somewhat like a fair flip
-    if choice == 'heads' and roll > 50:  # Make heads harder to win (boosting house edge)
-        actual_flip = 'tails'  # More likely to lose if player chooses heads
-    
-    if choice == 'tails' and roll <= 50:  # Make tails slightly harder too
-        actual_flip = 'heads'  # More likely to lose if player chooses tails
-
-    # If the player should lose based on the house edge, override the result
-    if not won and random.random() < 0.7:  # 70% of the time, losses feel more "natural"
-        actual_flip = 'tails' if choice == 'heads' else 'heads'
-
-    return actual_flip
-
-# Example usage:
-player_choice = 'heads'  # Simulating player choosing heads
-result = coin_flip(player_choice)
-print(f"Player chose {player_choice}. The result is: {result}")
-    
+    # If the player should lose based on house edge, override the result
+    # but make it feel natural by only doing this sometimes
+    if not won and random.random() < 0.75:  # 75% of losses feel natural
+        result = 'tails' if choice == 'heads' else 'heads'
+        
     if won:
         # Player wins their bet
         winnings = amount
@@ -1819,7 +1804,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
             result_embed.add_field(name="👥 PARTICIPANTS", value=f"**{len(giveaway['entries'])}**", inline=True)
             result_embed.add_field(name="⏰ DURATION", value="**25 seconds**", inline=True)
             
-            result_embed.set_footer(text="Winners announced below!")
+            result_embed.set_footer(text="Winners announced above!")
             
             try:
                 await interaction.edit_original_response(embed=result_embed, view=None)
