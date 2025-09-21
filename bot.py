@@ -1570,9 +1570,9 @@ class GiveawayEnterView(discord.ui.View):
 
 @bot.tree.command(name="giveaway", description="Start a token giveaway (25 seconds)")
 async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
-    # Check cooldown - 3 minutes (180 seconds) for giveaways
-    if not can_use_short_cooldown(interaction.user.id, "giveaway", 180):
-        await interaction.response.send_message("⏰ Please wait 3 minutes before starting another giveaway!", ephemeral=True)
+    # Check cooldown - 30 seconds for giveaways
+    if not can_use_short_cooldown(interaction.user.id, "giveaway", 30):
+        await interaction.response.send_message("⏰ Please wait 30 seconds before starting another giveaway!", ephemeral=True)
         return
     
     # Validate parameters - Minimum 50 tokens, maximum 5k for giveaway
@@ -1588,7 +1588,7 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
         await interaction.response.send_message("❌ Number of winners must be between 1 and 12!", ephemeral=True)
         return
     
-    # Check daily giveaway limit
+    # Check daily giveaway limit - Changed from 50000 to 5000
     user_id = str(interaction.user.id)
     today = datetime.now().date().isoformat()
     
@@ -1598,10 +1598,11 @@ async def giveaway(interaction: discord.Interaction, amount: int, winners: int):
     if today not in giveaway_daily_totals[user_id]:
         giveaway_daily_totals[user_id][today] = 0
     
-    if giveaway_daily_totals[user_id][today] + amount > 50000:
-        remaining = 50000 - giveaway_daily_totals[user_id][today]
+    # Changed from 50000 to 5000
+    if giveaway_daily_totals[user_id][today] + amount > 5000:
+        remaining = 5000 - giveaway_daily_totals[user_id][today]
         await interaction.response.send_message(
-            f"❌ You can only giveaway {remaining:,} more tokens today! (50k daily limit)",
+            f"❌ You can only giveaway {remaining:,} more tokens today! (5k daily limit)",  # Updated message
             ephemeral=True
         )
         return
@@ -2034,9 +2035,10 @@ async def giveawayinfo(interaction: discord.Interaction):
         inline=True
     )
     
+    # Changed from 50,000 to 5,000
     embed.add_field(
         name="🎉 Daily Giveaway Limit", 
-        value=f"**{daily_giveaway:,}/50,000** 🪙 used today\n*Resets at midnight*", 
+        value=f"**{daily_giveaway:,}/5,000** 🪙 used today\n*Resets at midnight*", 
         inline=True
     )
     
@@ -2154,8 +2156,8 @@ async def about(ctx):
         name="🎉 Giveaway System",
         value=(
             "• Anyone can host giveaways\n"
-            "• Maximum prize: 10,000 tokens per giveaway\n"
-            "• Maximum 50,000 tokens per day per user\n"
+            "• Maximum prize: 5,000 tokens per giveaway\n"
+            "• Maximum 5,000 tokens per day per user\n"
             "• 1-12 winners\n"
             "• 25 second duration\n"
             "• Special roles get bonus entries:\n"
