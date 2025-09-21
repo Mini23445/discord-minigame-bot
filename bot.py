@@ -584,15 +584,15 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
         await interaction.response.send_message(f"❌ Insufficient funds! You need **{amount - balance:,}** more tokens.", ephemeral=True)
         return
 
-    # More natural 43/57 odds with house edge
+    # More natural 46/54 odds with house edge
     # Instead of using a simple percentage, we'll use a more natural approach
     # that feels less like an algorithm
 
     # Generate a random number between 1-100
     roll = random.randint(1, 100)
 
-    # 57% chance to lose, 43% chance to win
-    won = roll > 54  # If roll is 55-100, player wins (47% chance)
+    # 54% chance to lose, 46% chance to win
+    won = roll > 53  # If roll is 55-100, player wins (46% chance)
 
     # Make it feel more natural by using actual coin flip logic
     # but with weighted outcomes
@@ -602,7 +602,7 @@ async def coinflip(interaction: discord.Interaction, amount: int, choice: str):
     # If the player should lose based on house edge, override the result
     # but make it feel natural by only doing this sometimes
     if not won and random.random() < 0.75:  # 75% of losses feel natural
-        result = 'tails' if choice == 'heads' else 'heads'
+       result = 'tails' if choice == 'heads' else 'heads'
         
     if won:
         # Player wins their bet
